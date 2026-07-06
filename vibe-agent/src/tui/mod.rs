@@ -225,8 +225,12 @@ impl App {
                         if let Ok(mut cl) = arboard::Clipboard::new() { let _ = cl.set_text(&text); self.status.set("copied"); }
                     }
                     KeyCode::Char(' ') => {
-                        let p = self.chat.scroll_pos(); let i = self.chat.line_count().saturating_sub(1 + p);
-                        self.chat.toggle_line(i);
+                        if self.focus == Focus::Chat {
+                            let p = self.chat.scroll_pos(); let i = self.chat.line_count().saturating_sub(1 + p);
+                            self.chat.toggle_line(i);
+                        } else {
+                            self.input.push_char(' ');
+                        }
                     }
                     KeyCode::Char(c) => { self.input.push_char(c); }
                     KeyCode::Backspace => { self.input.backspace(); }
