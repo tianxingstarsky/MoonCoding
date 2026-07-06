@@ -78,6 +78,17 @@ async fn run() -> Result<()> {
     std::env::set_current_dir(&root)?;
     let mut cfg = Config::load(&root)?;
 
+    // apply CLI flag overrides to config
+    let mut j = 1;
+    while j < args.len() {
+        match args[j].as_str() {
+            "--base-url" => { cfg.provider.base_url = args.get(j+1).cloned().unwrap_or_default(); j += 2; }
+            "--model"    => { cfg.provider.model = args.get(j+1).cloned().unwrap_or_default(); j += 2; }
+            "--api-key"  => { cfg.provider.api_key = args.get(j+1).cloned().unwrap_or_default(); j += 2; }
+            _ => { j += 1; }
+        }
+    }
+
     if cfg.provider.api_key.is_empty() && cmd != "tui" {
         eprintln!("{}  Set {}", "WARN".yellow().bold(), "MOONCODING_API_KEY".cyan());
         eprintln!("   or pass --api-key <key>");
@@ -86,7 +97,6 @@ async fn run() -> Result<()> {
     let session_store = SqliteStore::new(&cfg.session_dir.join("sessions.db"))?;
     let tools = build_tools();
 
-    let cmd = args.get(1).cloned().unwrap_or_else(|| "chat".to_string());
     match cmd.as_str() {
         "list"   => cmd_list(&session_store).await,
         "resume" => cmd_resume(args.get(2).cloned().unwrap_or_default(), &cfg, &tools, &session_store).await,
