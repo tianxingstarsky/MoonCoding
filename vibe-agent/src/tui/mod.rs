@@ -148,6 +148,10 @@ impl App {
                         crate::agent::INTERRUPTED.store(true, Ordering::SeqCst);
                         self.status.set("interrupted");
                     }
+                    KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        self.chat = ChatPanel::new();
+                        self.status.set("chat cleared");
+                    }
                     KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         // paste from clipboard into input
                         if let Ok(mut cl) = arboard::Clipboard::new() {
@@ -163,7 +167,32 @@ impl App {
                             let cmd = self.input.take(); self.input.toggle_command();
                             match cmd.trim() {
                                 "/q"|"/quit"|"/exit" => break,
+                                "/?"|"/h"|"/help" => {
+                                    self.chat.append_delta("keys: jk scroll · space expand · tab focus · y copy · ctrl+c stop · ctrl+k clear · ctrl+v paste · esc quit\ncommands: /models /use /clear /help /quit");
+                                }
                                 "/c"|"/clear" => { self.chat = ChatPanel::new(); }
+                                "/models" | "/m" => {
+                                    self.chat.append_delta("available models:\n  [1] deepseek-chat     (latest)\n  [2] deepseek-v4-flash (fast)\n  [3] deepseek-reasoner (R1)\n\n  type /use <name> or /use <number>");
+                                }
+                                "/use" => {
+                                    let parts: Vec<&str> = cmd.split_whitespace().collect();
+                                    if parts.len() > 1 {
+                                        let model = match parts[1] {
+                                            "1" | "deepseek-chat" => "deepseek-chat",
+                                            "2" | "deepseek-v4-flash" => "deepseek-v4-flash",
+                                            "3" | "deepseek-reasoner" => "deepseek-reasoner",
+                                            _ => parts[1],
+                                        };
+                                        // update config (only in-memory for current session)
+                                        let mut cfg = (*self.cfg).clone();
+                                        cfg.provider.model = model.to_string();
+                                        self.cfg = Arc::new(cfg);
+                                        self.chat.append_delta(&format!("model switched to: {}", model));
+                                        self.status.set(&format!("model: {}", model));
+                                    } else {
+                                        self.chat.append_delta("usage: /use <model-name> or /use <number>");
+                                    }
+                                }
                                 "/s"|"/sessions" => { self.chat.append_delta("saved sessions: (use /switch <id> to resume)"); }
                                 "/m"|"/model" => {
                                     self.chat.append_delta(&format!("model: {}\napi key: {}",
@@ -180,12 +209,7 @@ impl App {
                         let tx2 = tx.clone(); let tools2 = tools.clone(); let store2 = store.clone();
                         let cfg2 = self.cfg.clone(); let sid = uuid::Uuid::new_v4().to_string();
                         let interrupt2 = self.interrupt.clone();
-                        let has_key = !cfg2.provider.api_key.is_empty();
                         std::thread::spawn(move || {
-                            if !has_key {
-                                tx2.send(AgentEvent::Error("api_key is empty".into())).ok();
-                                return;
-                            }
                             let rt = tokio::runtime::Runtime::new().unwrap();
                             rt.block_on(async {
                                 let _ = crate::agent::run_agent(&cfg2, &tools2, store2.as_ref(), &prompt, &sid,

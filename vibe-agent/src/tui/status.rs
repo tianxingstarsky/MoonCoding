@@ -23,7 +23,7 @@ impl StatusBar {
             Span::raw(" "),
             Span::styled(&self.left, Style::default().fg(TEXT)),
             Span::raw("  "),
-            Span::styled("ctrl+c stop · tab focus · jk scroll · space expand · / cmd · esc quit",
+            Span::styled("jk ↑↓  ·  / cmd  ·  space expand  ·  tab focus  ·  y copy  ·  ctrl+c stop  ·  ctrl+k clear  ·  esc quit",
                 Style::default().fg(TEXT_MUTED)),
         ]);
         let p = Paragraph::new(line).style(Style::default().bg(BG_BAR));
