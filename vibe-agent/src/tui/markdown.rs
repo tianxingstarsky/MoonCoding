@@ -12,7 +12,7 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
     let mut in_code_block = false;
     let mut code_lang = String::new();
     let mut code_buffer = String::new();
-    let mut span_style = Style::default().fg(Color::White);
+    let mut span_style = Style::default().fg(Color::Rgb(224, 224, 224));
 
     for event in parser {
         match event {
@@ -46,7 +46,7 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
             Event::End(tag) => match tag {
                 TagEnd::Paragraph | TagEnd::Heading(_) => {
                     if !current_line.is_empty() { lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>())); }
-                    span_style = Style::default().fg(Color::White);
+                    span_style = Style::default().fg(Color::Rgb(224, 224, 224));
                     if matches!(tag, TagEnd::Paragraph) { lines.push(Line::default()); }
                 }
                 TagEnd::CodeBlock => {

@@ -146,8 +146,8 @@ impl App {
                 // ── mouse scroll ──
                 if let Event::Mouse(mouse) = &ev {
                     match mouse.kind {
-                        MouseEventKind::ScrollUp => { self.chat.scroll_up(); }
-                        MouseEventKind::ScrollDown => { self.chat.scroll_down(); }
+                        MouseEventKind::ScrollDown => { self.chat.scroll_up(); }
+                        MouseEventKind::ScrollUp => { self.chat.scroll_down(); }
                         _ => {}
                     }
                     continue;
