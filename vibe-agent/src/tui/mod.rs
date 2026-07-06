@@ -41,7 +41,7 @@ pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn Sess
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let app = App::new(cfg.clone(), store.clone());
+    let app = App::new(cfg.clone());
     let res = app.run_loop(&mut terminal, tools, store).await;
 
     disable_raw_mode()?;
@@ -63,7 +63,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(cfg: Arc<Config>, store: Arc<dyn SessionStore>) -> Self {
+    pub fn new(cfg: Arc<Config>) -> Self {
         let mut chat = ChatPanel::new();
         chat.push(Line::from(vec![
             Span::styled("vibe-agent ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
@@ -76,8 +76,7 @@ impl App {
             ("provider".into(), cfg.provider.base_url.clone()),
             ("steps".into(), cfg.agent.max_steps.unwrap_or(40).to_string()),
         ]);
-        let session_ids = tokio::runtime::Handle::current()
-            .block_on(async { store.list().await }).unwrap_or_default();
+        let session_ids = Vec::new();
         Self { cfg, chat, side, input: InputPanel::new(), status: StatusBar::new("ready"),
             focus: Focus::Input, thinking: false, interrupt: Arc::new(AtomicBool::new(false)), session_ids }
     }
