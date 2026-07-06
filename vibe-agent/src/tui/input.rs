@@ -8,10 +8,17 @@ use ratatui::{
 pub struct InputPanel {
     pub buffer: String,
     pub cursor: usize,
+    pub command_mode: bool,
 }
 
 impl InputPanel {
-    pub fn new() -> Self { Self { buffer: String::new(), cursor: 0 } }
+    pub fn new() -> Self { Self { buffer: String::new(), cursor: 0, command_mode: false } }
+
+    pub fn toggle_command(&mut self) {
+        self.command_mode = !self.command_mode;
+        if self.command_mode { self.buffer = "/".into(); self.cursor = 1; }
+        else { self.buffer.clear(); self.cursor = 0; }
+    }
 
     pub fn push_char(&mut self, c: char) {
         self.buffer.insert(self.cursor, c);
@@ -52,8 +59,9 @@ impl InputPanel {
             }
             s
         };
+        let title = if self.command_mode { " / cmd " } else { " moon> " };
         let input = Paragraph::new(display.as_str())
-            .block(Block::default().borders(Borders::ALL).title(" moon> "))
+            .block(Block::default().borders(Borders::ALL).title(title))
             .style(Style::default().fg(Color::White));
         f.render_widget(input, area);
     }

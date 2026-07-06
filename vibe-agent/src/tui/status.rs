@@ -19,6 +19,8 @@ impl StatusBar {
         let line = Line::from(vec![
             Span::raw(" "),
             Span::styled(&self.text, Style::default().fg(Color::White)),
+            Span::raw("  "),
+            Span::styled("/ cmd | jk scroll | space expand | Esc quit", Style::default().fg(Color::DarkGray)),
         ]);
         let p = Paragraph::new(line)
             .style(Style::default().bg(Color::Rgb(30, 30, 30)));

@@ -101,8 +101,38 @@ terminal.draw(|f| {
                 let Event::Key(key) = event::read()? else { continue };
                 if key.kind != KeyEventKind::Press { continue; }
                 match key.code {
-                    KeyCode::Esc => break,
+                    KeyCode::Char('/') if !self.input.command_mode => {
+                        self.input.toggle_command();
+                    }
+                    KeyCode::Esc => {
+                        if self.input.command_mode { self.input.toggle_command(); }
+                        else { break; }
+                    }
                     KeyCode::Enter => {
+                        if self.input.command_mode {
+                            let cmd = self.input.take();
+                            self.input.toggle_command();
+                            // handle slash commands
+                            match cmd.trim() {
+                                "/q" | "/quit" | "/exit" => break,
+                                "/h" | "/help" => {
+                                    self.chat.push_user("/help");
+                                    self.chat.append_delta("Commands: /q quit, /h help, /s sessions, /c clear chat, /n new session");
+                                }
+                                "/c" | "/clear" => {
+                                    self.chat = ChatPanel::new();
+                                    self.chat.push(Line::from(Span::styled("chat cleared", Style::default().fg(Color::DarkGray))));
+                                }
+                                "/s" | "/sessions" => {
+                                    self.chat.push_user("/sessions");
+                                    self.chat.append_delta("session: "); // simplified
+                                }
+                                _ => {
+                                    self.chat.push_user(&cmd);
+                                }
+                            }
+                            continue;
+                        }
                         let prompt = self.input.take();
                         if prompt.is_empty() { continue; }
                         self.chat.push_user(&prompt);
