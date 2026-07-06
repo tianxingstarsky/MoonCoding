@@ -146,10 +146,15 @@ impl OpenAiCompatible {
             "tool_choice": "auto",
         });
 
-        let mut req = self.client.post(&url).json(&body);
-        if !self.api_key.is_empty() {
-            req = req.bearer_auth(&self.api_key);
+        let preview = if self.api_key.len() > 15 { format!("{}...", &self.api_key[..15]) } else if self.api_key.is_empty() { "(empty)".into() } else { self.api_key.clone() };
+        eprintln!("[provider] key_prefix={}  url={}  model={}", preview, self.base_url, self.model);
+
+        if self.api_key.is_empty() {
+            return Err(anyhow!("api_key is empty - set DEEPSEEK_API_KEY"));
         }
+
+        let mut req = self.client.post(&url).json(&body);
+        req = req.header("Authorization", format!("Bearer {}", self.api_key));
         let resp = req.send().await?;
         if !resp.status().is_success() {
             let status = resp.status();
