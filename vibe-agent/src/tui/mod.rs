@@ -127,12 +127,30 @@ pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn Sess
                     KeyCode::Enter => {
                         if inp.cmd {
                             let cmd = inp.take(); inp.cmd = false;
-                            match cmd.trim() {
+                            let raw = cmd.trim();
+                            // bare number in command mode = model pick
+                            if raw.len() <= 2 && raw.chars().all(|c| c.is_ascii_digit()) {
+                                let model = match raw {
+                                    "1" => "deepseek-chat", "2" => "deepseek-v4-flash",
+                                    "3" => "deepseek-reasoner", "4" => "gpt-4o",
+                                    "5" => "gpt-4o-mini", "6" => "claude-3.5-sonnet",
+                                    "7" => "llama-3.1-70b",
+                                    _ => "",
+                                };
+                                if !model.is_empty() {
+                                    let mut o = stdout();
+                                    execute!(o, clr(OK))?; writeln!(o, "  model => {}", model)?;
+                                    execute!(o, clr(MUTED))?; writeln!(o, "  (restart with $env:MOONCODING_MODEL='{}')", model)?;
+                                    execute!(o, ResetColor)?; o.flush()?;
+                                }
+                                continue;
+                            }
+                            match raw {
                                 "/exit"|"/q"|"/quit" => break,
                                 "/c"|"/clear" => { execute!(out, Clear(ClearType::All))?; }
                                 "/h"|"/help" => {
                                     let mut o = stdout();
-                                    execute!(o, clr(ACC))?; writeln!(o, "  [1] /model           show & pick models")?;
+                                    execute!(o, clr(ACC))?; writeln!(o, "  [1]-[7]            pick model (type number)")?;
                                     execute!(o, clr(ACC))?; writeln!(o, "  [2] /key <sk-...>    set api key")?;
                                     execute!(o, clr(ACC))?; writeln!(o, "  [3] /status          show session")?;
                                     execute!(o, clr(ACC))?; writeln!(o, "  [4] /clear           clear screen")?;
