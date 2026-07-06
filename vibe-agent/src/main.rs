@@ -7,9 +7,17 @@ mod stream;
 mod tools;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use colored::*;
+use rustyline::completion::{Completer, FilenameCompleter, Pair};
+use rustyline::highlight::Highlighter;
+use rustyline::hint::Hinter;
+use rustyline::validate::Validator;
+use rustyline::{Config as RustyConfig, Context, EditMode, Editor, Helper};
+use rustyline::history::DefaultHistory;
 use std::path::PathBuf;
 use std::process::exit;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use crate::config::Config;
 use crate::session::{SessionStore, SqliteStore};
@@ -22,179 +30,244 @@ use crate::tools::read::ReadTool;
 use crate::tools::todowrite::TodoWriteTool;
 use crate::tools::vibe::VibeTool;
 
-#[derive(Parser)]
-#[command(name = "vibe-agent", about = "MoonCoding interactive CLI agent")]
-struct Cli {
-    #[command(subcommand)]
-    cmd: Cmd,
-
-    /// LLM provider base URL (env: MOONCODING_BASE_URL)
-    #[arg(long = "base-url")]
-    base_url: Option<String>,
-
-    /// Model name (env: MOONCODING_MODEL)
-    #[arg(long = "model")]
-    model: Option<String>,
-
-    /// API key (env: MOONCODING_API_KEY)
-    #[arg(long = "api-key")]
-    api_key: Option<String>,
-
-    /// Working directory
-    #[arg(short = 'C', long = "workdir")]
-    workdir: Option<PathBuf>,
+struct MoonHelper {
+    completer: FilenameCompleter,
 }
-
-#[derive(Subcommand)]
-enum Cmd {
-    /// Start an interactive chat (default)
-    Chat {
-        /// Prompt text (if empty, reads from stdin)
-        prompt: Vec<String>,
-        /// Session ID to resume
-        #[arg(long)]
-        session: Option<String>,
-    },
-    /// List saved sessions
-    List,
-    /// Resume a saved session
-    Resume {
-        session_id: String,
-    },
-    /// Show project tree (Phase B placeholder)
-    Tree,
+impl Highlighter for MoonHelper {}
+impl Hinter for MoonHelper {
+    type Hint = String;
+    fn hint(&self, _line: &str, _pos: usize, _ctx: &Context<'_>) -> Option<String> { None }
 }
+impl Validator for MoonHelper {}
+impl Completer for MoonHelper {
+    type Candidate = Pair;
+    fn complete(&self, line: &str, pos: usize, ctx: &Context<'_>) -> rustyline::Result<(usize, Vec<Pair>)> {
+        self.completer.complete(line, pos, ctx)
+    }
+}
+impl Helper for MoonHelper {}
 
 fn main() {
-    let rt = tokio::runtime::Builder::new_current_thread()
+    let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all().build().expect("tokio");
     rt.block_on(async {
         if let Err(e) = run().await {
-            eprintln!("error: {:#}", e);
+            eprintln!("{} {}", "✗".red().bold(), e.to_string().red());
             exit(1);
         }
     });
 }
 
 async fn run() -> Result<()> {
-    let cli = Cli::parse();
-    let root = cli.workdir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-    let project = find_project_root(&root);
-    std::env::set_current_dir(&project)?;
+    let args: Vec<String> = std::env::args().collect();
+    // 先处理 -C workdir 改变当前目录
+    let mut i = 1;
+    while i < args.len() {
+        if args[i] == "-C" || args[i] == "--workdir" {
+            if let Some(dir) = args.get(i+1) {
+                std::env::set_current_dir(dir)?;
+            }
+            i += 2;
+        } else { i += 1; }
+    }
+    let root = find_project_root(&std::env::current_dir().unwrap_or_default());
+    std::env::set_current_dir(&root)?;
+    let mut cfg = Config::load(&root)?;
 
-    let mut cfg = Config::load(&project)?;
-    // CLI flags override env/toml
-    if let Some(b) = cli.base_url { cfg.provider.base_url = b; }
-    if let Some(m) = cli.model { cfg.provider.model = m; }
-    if let Some(k) = cli.api_key { cfg.provider.api_key = k; }
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--base-url" => { cfg.provider.base_url = args.get(i+1).cloned().unwrap_or_default(); i += 2; }
+            "--model"   => { cfg.provider.model = args.get(i+1).cloned().unwrap_or_default(); i += 2; }
+            "--api-key" => { cfg.provider.api_key = args.get(i+1).cloned().unwrap_or_default(); i += 2; }
+            _ => { i += 1; }
+        }
+    }
 
     if cfg.provider.api_key.is_empty() {
-        eprintln!("WARN: no API key set. Set MOONCODING_API_KEY or DEEPSEEK_API_KEY env var.");
-        eprintln!("For local ollama, set MOONCODING_BASE_URL=http://localhost:11434/v1");
+        eprintln!("{}  Set {}", "WARN".yellow().bold(), "MOONCODING_API_KEY".cyan());
+        eprintln!("   or pass --api-key <key>");
     }
 
     let session_store = SqliteStore::new(&cfg.session_dir.join("sessions.db"))?;
     let tools = build_tools();
 
-    match &cli.cmd {
-        Cmd::Chat { prompt, session: _ } => {
-            let input = if prompt.is_empty() {
-                eprint!("moon> ");
-                let mut s = String::new();
-                std::io::stdin().read_line(&mut s).unwrap_or_default();
-                s.trim().to_string()
-            } else { prompt.join(" ") };
-            if input.is_empty() { eprintln!("(no input)"); return Ok(()); }
+    let cmd = args.get(1).cloned().unwrap_or_else(|| "chat".to_string());
+    match cmd.as_str() {
+        "list"   => cmd_list(&session_store).await,
+        "resume" => cmd_resume(args.get(2).cloned().unwrap_or_default(), &cfg, &tools, &session_store).await,
+        "new"    => cmd_new_session(&cfg, &tools, &session_store).await,
+        _        => cmd_chat(&cfg, &tools, &session_store).await,
+    }
+}
 
-            run_agent_loop(&cfg, &tools, &session_store, &input).await?;
-        }
-        Cmd::List => {
-            let ids = session_store.list().await?;
-            if ids.is_empty() { println!("(no saved sessions)"); }
-            for id in ids {
-                if let Some(s) = session_store.load(&id).await? {
-                    println!("{}  step={}  tok={}/{}  {}",
-                        &id[..8.min(id.len())], s.step, s.tokens_in, s.tokens_out,
-                        s.updated_at.as_str());
-                }
-            }
-        }
-        Cmd::Resume { session_id } => {
-            if let Some(s) = session_store.load(session_id).await? {
-                println!("resumed session {} (step={}, tok={}/{})", &s.id[..8], s.step, s.tokens_in, s.tokens_out);
-                eprint!("moon> ");
-                let mut input = String::new();
-                std::io::stdin().read_line(&mut input).unwrap_or_default();
-                let input = input.trim().to_string();
-                if input.is_empty() { return Ok(()); }
-                run_agent_loop(&cfg, &tools, &session_store, &input).await?;
-            } else {
-                eprintln!("session not found: {}", session_id);
-            }
-        }
-        Cmd::Tree => {
-            println!("(tree command reserved for Phase B)");
+async fn cmd_chat(cfg: &Config, tools: &ToolRegistry, store: &dyn SessionStore) -> Result<()> {
+    let (session_id, resumed) = if let Some(id) = store.latest().await? { (id, true) } else { (uuid::Uuid::new_v4().to_string(), false) };
+    print_welcome(cfg, &session_id, resumed, store).await;
+    repl_loop(cfg, tools, store, &session_id).await
+}
+
+async fn cmd_list(store: &dyn SessionStore) -> Result<()> {
+    let ids = store.list().await?;
+    if ids.is_empty() { println!("  (no saved sessions)"); return Ok(()); }
+    println!("{}", "─ sessions ─".dimmed());
+    for id in &ids {
+        if let Some(s) = store.load(id).await? {
+            let preview = s.messages.iter().filter(|m| m.role=="user").last()
+                .and_then(|m| m.content.as_deref()).unwrap_or("").chars().take(60).collect::<String>();
+            let tag = if s.step > 0 { format!("step={}", s.step) } else { "new".into() };
+            println!("  {}  {}  {}  {}",
+                &id[..8.min(id.len())].cyan(), tag.dimmed(),
+                format!("{}/{}t", s.tokens_in, s.tokens_out).dimmed(), preview.dimmed());
         }
     }
     Ok(())
 }
 
+async fn cmd_resume(id: String, cfg: &Config, tools: &ToolRegistry, store: &dyn SessionStore) -> Result<()> {
+    if let Some(_s) = store.load(&id).await? {
+        print_welcome(cfg, &id, true, store).await;
+        repl_loop(cfg, tools, store, &id).await
+    } else { eprintln!("{} not found", "✗".red()); Ok(()) }
+}
+
+async fn cmd_new_session(cfg: &Config, tools: &ToolRegistry, store: &dyn SessionStore) -> Result<()> {
+    let id = uuid::Uuid::new_v4().to_string();
+    print_welcome(cfg, &id, false, store).await;
+    repl_loop(cfg, tools, store, &id).await
+}
+
+// ── REPL ──
+
+async fn repl_loop(cfg: &Config, tools: &ToolRegistry, store: &dyn SessionStore, session_id: &str) -> Result<()> {
+    let rl_cfg = RustyConfig::builder().history_ignore_space(true).edit_mode(EditMode::Vi).build();
+    let mut rl = Editor::<MoonHelper, DefaultHistory>::with_config(rl_cfg)?;
+    rl.set_helper(Some(MoonHelper { completer: FilenameCompleter::default() }));
+    let history_path = cfg.session_dir.join("history");
+    let _ = rl.load_history(&history_path);
+
+    let interrupted = Arc::new(AtomicBool::new(false));
+
+    loop {
+        let prompt = format!("{} ", "moon>".green().bold());
+        let readline = rl.readline(&prompt);
+        match readline {
+            Ok(line) => {
+                let line = line.trim().to_string();
+                if line.is_empty() { continue; }
+                rl.add_history_entry(&line)?;
+                if line.starts_with('/') {
+                    let quit = handle_command(&line, cfg, store, session_id).await?;
+                    if quit { break; }
+                    continue;
+                }
+                let flag = interrupted.clone();
+                let result = agent::run_agent(cfg, tools, store, &line, session_id, &mut |ev| render_event(ev, &flag)).await;
+                if let Err(e) = result { eprintln!("\n{} {}", "✗".red(), e.to_string().red()); }
+            }
+            Err(rustyline::error::ReadlineError::Interrupted) => {
+                interrupted.store(true, Ordering::SeqCst);
+                println!("\n{}  type new prompt or /exit", "⏸".yellow());
+                interrupted.store(false, Ordering::SeqCst);
+            }
+            Err(rustyline::error::ReadlineError::Eof) => { println!("\n{} Goodbye.", "✓".green()); break; }
+            Err(e) => { eprintln!("{}", e); break; }
+        }
+        let _ = rl.save_history(&history_path);
+    }
+    Ok(())
+}
+
+async fn handle_command(line: &str, _cfg: &Config, store: &dyn SessionStore, current_id: &str) -> Result<bool> {
+    let parts: Vec<&str> = line[1..].split_whitespace().collect();
+    if parts.is_empty() { return Ok(false); }
+    match parts[0] {
+        "exit" | "quit" | "q" => { println!("{} Goodbye.", "✓".green()); return Ok(true); }
+        "help" | "h" => {
+            println!("{}", "─ commands ─".bold());
+            println!("  {:<20} exit", "/exit, /q".cyan());
+            println!("  {:<20} help", "/help".cyan());
+            println!("  {:<20} list sessions", "/sessions".cyan());
+            println!("  {:<20} current status", "/status".cyan());
+        }
+        "sessions" => { cmd_list(store).await?; }
+        "status" => {
+            println!("{}", "─ status ─".bold());
+            println!("  session  : {}", &current_id[..8.min(current_id.len())].cyan());
+            if let Some(s) = store.load(current_id).await? {
+                println!("  steps    : {}", s.step);
+                println!("  tokens   : in {} / out {}", s.tokens_in, s.tokens_out);
+            }
+        }
+        _ => { eprintln!("{}  try /help", "?".yellow()); }
+    }
+    Ok(false)
+}
+
+// ── rendering ──
+
+async fn print_welcome(cfg: &Config, session_id: &str, resumed: bool, store: &dyn SessionStore) {
+    let tag = if resumed { "resumed".dimmed() } else { "new".dimmed() };
+    let line1 = format!("--- vibe-agent {} {} {} session {} @ {} ---",
+        cfg.provider.model.cyan(), tag,
+        "session".dimmed(), &session_id[..8].dimmed(), cfg.provider.base_url.dimmed());
+    println!("{}", line1);
+    println!("  {}  {}",
+        format!("max {}", cfg.agent.max_steps.unwrap_or(40)).dimmed(), "/help . Ctrl+D".dimmed());
+    if resumed {
+        if let Ok(Some(s)) = store.load(session_id).await {
+            println!("  {}", format!("restored step={} tok={}/{}", s.step, s.tokens_in, s.tokens_out).dimmed());
+        }
+    }
+    let bot = "-".repeat(line1.len().min(80));
+    println!("{}", bot);
+    println!();
+}
+
+fn render_event(ev: AgentEvent, interrupted: &AtomicBool) {
+    if interrupted.load(Ordering::SeqCst) { return; }
+    match ev {
+        AgentEvent::Thinking => { eprint!("{} ", "⏳".yellow()); }
+        AgentEvent::TextDelta(t) => { eprint!("{}", t); }
+        AgentEvent::TextDone { tokens_in, tokens_out, .. } => {
+            eprintln!("\n{}", format!("  ── {}/{} tokens ──", tokens_in, tokens_out).dimmed());
+        }
+        AgentEvent::ToolCallStart { name, input: inp, .. } => {
+            let preview: String = inp.chars().take(80).collect();
+            eprintln!("  [{}] {} {}",
+                name.bright_cyan().bold(), "args:".dimmed(), preview.dimmed());
+        }
+        AgentEvent::ToolCallResult { name, output, exit_code, .. } => {
+            let code = if exit_code==0 { "0".green() } else { exit_code.to_string().red() };
+            eprintln!("  [{} exit {}]", name, code);
+            for line in output.lines().take(3) {
+                eprintln!("    {}", line.dimmed());
+            }
+        }
+        AgentEvent::Done { tokens_in, tokens_out, steps } => {
+            eprintln!("\n{} {} steps, {}/{} tokens",
+                "done".green().bold(), steps.to_string().cyan(),
+                tokens_in.to_string().yellow(), tokens_out.to_string().yellow());
+        }
+        AgentEvent::Error(e) => { eprintln!("\n{} {}", "✗".red().bold(), e.red()); }
+        AgentEvent::Interrupted(r) => { eprintln!("\n{} {}", "⏸".yellow(), r.yellow()); }
+        _ => {}
+    }
+}
+
+// ── helpers ──
+
 fn build_tools() -> ToolRegistry {
     let mut r = ToolRegistry::new();
-    r.register(ReadTool);
-    r.register(GrepTool);
-    r.register(GlobTool);
-    r.register(BashTool);
-    r.register(TodoWriteTool);
-    r.register(VibeTool);
+    r.register(ReadTool); r.register(GrepTool); r.register(GlobTool);
+    r.register(BashTool); r.register(TodoWriteTool); r.register(VibeTool);
     r
 }
 
 fn find_project_root(start: &PathBuf) -> PathBuf {
     let mut p = start.clone();
     loop {
-        if p.join(".mooncoding.toml").exists() || p.join(".git").exists() {
-            return p;
-        }
-        if let Some(parent) = p.parent() {
-            p = parent.to_path_buf();
-        } else {
-            return start.clone();
-        }
+        if p.join(".mooncoding.toml").exists() || p.join(".git").exists() { return p; }
+        if let Some(pr) = p.parent() { p = pr.to_path_buf(); } else { return start.clone(); }
     }
-}
-
-async fn run_agent_loop(cfg: &Config, tools: &ToolRegistry, store: &dyn SessionStore, input: &str) -> Result<()> {
-    let mut step_label = String::new();
-    agent::run_agent(cfg, tools, store, input, &mut |ev| {
-        match ev {
-            AgentEvent::Thinking => { eprint!("\n{}thinking...", step_label); step_label.clear(); }
-            AgentEvent::TextDelta(t) => { eprint!("{}", t); }
-            AgentEvent::TextDone { tokens_in, tokens_out, .. } => {
-                eprintln!();
-                step_label = format!("[{}/{}t] ", tokens_in, tokens_out);
-            }
-            AgentEvent::ToolCallStart { name, input: inp, .. } => {
-                eprintln!("\n  [{}{}] {}", step_label, name, inp);
-                step_label.clear();
-            }
-            AgentEvent::ToolCallResult { name, output, exit_code, .. } => {
-                let preview: String = output.lines().take(4).collect::<Vec<_>>().join("\n  ");
-                eprintln!("  [{}{} exit {}]\n  {}", step_label, name, exit_code, preview);
-                step_label.clear();
-            }
-            AgentEvent::Done { tokens_in, tokens_out, steps } => {
-                eprintln!("\n✓ done. steps={} tokens={}/{}", steps, tokens_in, tokens_out);
-            }
-            AgentEvent::TreeUpdated { json } => {
-                eprintln!("\n[tree updated] {}", json);
-            }
-            AgentEvent::Error(e) => {
-                eprintln!("\n✗ error: {}", e);
-            }
-            AgentEvent::Interrupted(reason) => {
-                eprintln!("\n⏸ interrupted: {}", reason);
-            }
-        }
-    }).await
 }

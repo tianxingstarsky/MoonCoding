@@ -1,0 +1,22 @@
+# MoonCoding agent configuration
+# This file is optional — all values can come from environment variables instead.
+
+[provider]
+# OpenAI-compatible endpoint
+base_url = "https://api.deepseek.com"       # MOONCODING_BASE_URL
+model = "deepseek-v4-flash"                  # MOONCODING_MODEL
+# api_key = "${DEEPSEEK_API_KEY}"            # MOONCODING_API_KEY (or DEEPSEEK_API_KEY / OPENAI_API_KEY)
+max_tokens = 4096
+temperature = 0.1
+
+[agent]
+max_steps = 40
+prune_after = 12
+prune_keep = 6
+tree_enabled = false    # Phase B: enable tree-based project management
+
+# For local ollama:
+# [provider]
+# base_url = "http://localhost:11434/v1"
+# model = "llama3.1"
+# api_key = ""

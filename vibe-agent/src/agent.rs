@@ -18,6 +18,7 @@ pub async fn run_agent(
     tools: &ToolRegistry,
     session_store: &dyn SessionStore,
     user_input: &str,
+    session_id: &str,
     on_event: &mut dyn FnMut(AgentEvent),
 ) -> Result<()> {
     on_event(AgentEvent::Thinking);
@@ -27,7 +28,7 @@ pub async fn run_agent(
         cfg.provider.max_tokens, cfg.provider.temperature,
     )?;
 
-    let mut session = load_or_create_session(session_store, &cfg.provider.model, &cfg.provider.base_url).await?;
+    let mut session = load_or_create_session(session_store, session_id, &cfg.provider.model, &cfg.provider.base_url).await?;
     session.messages.push(Message {
         role: "user".to_string(),
         content: Some(user_input.to_string()),
@@ -134,13 +135,19 @@ pub async fn run_agent(
 
             let start = Instant::now();
             let result = tools.dispatch(&tc.name, input, &tool_ctx).await.unwrap_or_else(|| {
-                super::tools::ToolResult { output: format!("unknown tool: {}", tc.name), exit_code: 1, duration_ms: 0, truncated: false }
+                crate::tools::ToolResult { output: format!("unknown tool: {}", tc.name), exit_code: 1, duration_ms: 0, truncated: false }
             });
             let ms = start.elapsed().as_millis() as u64;
 
             let mut output_text = result.output;
             if output_text.len() > TOOL_OUTPUT_MAX_CHARS {
-                output_text.truncate(TOOL_OUTPUT_MAX_CHARS);
+                // safe truncate: find last valid char boundary
+                while !output_text.is_char_boundary(TOOL_OUTPUT_MAX_CHARS) {
+                    output_text.truncate(TOOL_OUTPUT_MAX_CHARS.saturating_sub(1));
+                }
+                if output_text.len() > TOOL_OUTPUT_MAX_CHARS {
+                    output_text.truncate(TOOL_OUTPUT_MAX_CHARS);
+                }
                 output_text.push_str("\n(output trimmed)");
             }
 
@@ -181,14 +188,10 @@ fn tool_descriptions_text(registry: &ToolRegistry) -> String {
     s
 }
 
-async fn load_or_create_session(store: &dyn SessionStore, model: &str, provider: &str) -> Result<Session> {
-    if let Some(id) = store.latest().await? {
-        if let Some(s) = store.load(&id).await? {
-            return Ok(s);
-        }
-    }
+async fn load_or_create_session(store: &dyn SessionStore, id: &str, model: &str, provider: &str) -> Result<Session> {
+    if let Some(s) = store.load(id).await? { return Ok(s); }
     Ok(Session {
-        id: uuid::Uuid::new_v4().to_string(),
+        id: id.to_string(),
         provider: provider.to_string(),
         model: model.to_string(),
         messages: Vec::new(),

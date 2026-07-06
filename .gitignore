@@ -18,3 +18,9 @@ test_project/
 _out.py
 draft.txt
 *.zip
+
+# vibe-agent session data
+.mooncoding/
+_out.py
+draft.txt
+*.zip
