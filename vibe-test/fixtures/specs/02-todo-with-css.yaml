@@ -1,0 +1,21 @@
+id: 02-todo-with-css
+assertions:
+  - name: "style.css exists"
+    kind: file_exists
+    files: ["style.css"]
+  - name: "verify server.py"
+    kind: verify_exit_zero
+    files: ["server.py"]
+  - name: "verify app.js"
+    kind: verify_exit_zero
+    files: ["app.js"]
+  - name: "verify style.css"
+    kind: verify_exit_zero
+    files: ["style.css"]
+inherits_workspace: true
+task: |
+  在已存在的 TodoList demo 基础上扩展:
+    - 新增 style.css (简单的 Todo 列表样式)
+    - app.js 里追加一个 fetch 失败时的错误处理 (重试一次 + 提示用户) — 必须用 vibe replace app.js 对应块或 vibe insert
+  仍然禁止手动编辑源文件.
+  所有改动后跑 vibe verify 确认字节一致. 完成后输出最终 overview 并以 <done/> 结束.

@@ -1,0 +1,16 @@
+id: 03-todo-refactor
+assertions:
+  - name: "server.py verified"
+    kind: verify_exit_zero
+    files: ["server.py"]
+  - name: "app.js verified"
+    kind: verify_exit_zero
+    files: ["app.js"]
+inherits_workspace: true
+task: |
+  重构现有的 app.js / server.py:
+    - 把 app.js 里某个函数拆成两独立块 (drop 旧块再 insert 两次), 例如 loadTodos 与 renderTodos 分成两块
+    - 把 server.py 里某个路由函数改个名 (例如 add -> create_task), 同步改 app.js 中相应调用点
+  这要求正确处理 rev 校验: 修改任何 fileset 之前先 vibe overview 拿当前 rev.
+  vibe 会在你 replace/drop 后打出 "cross-block dep impact" WARN, 注意收 WARN 提示并修复相关块.
+  最终跑 vibe verify 通过并贴出最终 overview, 然后以 <done/> 结束.

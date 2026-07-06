@@ -1,0 +1,1 @@
+{"rev":REPL_REV,"seq":3,"code":"\ndef mul(a,b):\n    return a*10\n\n","tail":{"summary":"mul(a,b)","purpose":"mul *10"},"purpose_decision":{"changed":"simple demo with mul"}}

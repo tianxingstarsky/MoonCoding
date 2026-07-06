@@ -1,0 +1,1 @@
+{"rev":1,"after":2,"code":"\ndef mul(a,b):\n    return a*b\n\n","tail":{"summary":"mul(a,b)","purpose":"two-num multiply"},"purpose_decision":{"changed":"simple demo with mul"}}

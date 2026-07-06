@@ -1,0 +1,20 @@
+# Rust build artifacts
+target/
+*.lock
+
+# vibe-test run outputs
+vibe-test/runs/
+
+# local vibe workdirs
+.vibe/
+
+# third-party source
+opencode-1.17.13/
+
+# local test workspace
+test_project/
+
+# misc leftovers
+_out.py
+draft.txt
+*.zip

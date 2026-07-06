@@ -1,0 +1,24 @@
+id: 01-todo-min
+assertions:
+  - name: "server.py exists"
+    kind: file_exists
+    files: ["server.py"]
+  - name: "index.html exists"
+    kind: file_exists
+    files: ["index.html"]
+  - name: "app.js exists"
+    kind: file_exists
+    files: ["app.js"]
+  - name: "verify server.py"
+    kind: verify_exit_zero
+    files: ["server.py"]
+  - name: "verify app.js"
+    kind: verify_exit_zero
+    files: ["app.js"]
+inherits_workspace: true
+task: |
+  用 vibe 协议从零构建一个前后端分离的 TodoList demo:
+    - 后端 server.py: 用 Flask, 提供路由 GET /tasks, POST /tasks (body {"text": "..."}), POST /tasks/<id>/done
+    - 前端 index.html + app.js: 加载 (fetch) 调后端 API
+  约束: 所有 .py 与 .js 文件必须先 vibe new 创建, 再 vibe insert 多次, 然后 vibe assemble 写出, 最后 vibe verify 通过. 禁止手动 vi/nano/sed 编辑.
+  完成后对每个 fileset 跑一遍 vibe overview, 把输出贴在最终回复里, 并以 <done/> 结束.
