@@ -20,6 +20,7 @@ use crate::stream::AgentEvent;
 use crate::tools::ToolRegistry;
 
 mod chat;
+mod diff;
 mod input;
 mod markdown;
 mod side;
@@ -40,7 +41,7 @@ pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn Sess
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let app = App::new(cfg.clone());
+    let app = App::new(cfg.clone(), store.clone());
     let res = app.run_loop(&mut terminal, tools, store).await;
 
     disable_raw_mode()?;
@@ -58,10 +59,11 @@ pub struct App {
     pub focus: Focus,
     pub thinking: bool,
     pub interrupt: Arc<AtomicBool>,
+    pub session_ids: Vec<String>,
 }
 
 impl App {
-    pub fn new(cfg: Arc<Config>) -> Self {
+    pub fn new(cfg: Arc<Config>, store: Arc<dyn SessionStore>) -> Self {
         let mut chat = ChatPanel::new();
         chat.push(Line::from(vec![
             Span::styled("vibe-agent ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
@@ -74,7 +76,10 @@ impl App {
             ("provider".into(), cfg.provider.base_url.clone()),
             ("steps".into(), cfg.agent.max_steps.unwrap_or(40).to_string()),
         ]);
-        Self { cfg, chat, side, input: InputPanel::new(), status: StatusBar::new("ready"), focus: Focus::Input, thinking: false, interrupt: Arc::new(AtomicBool::new(false)) }
+        let session_ids = tokio::runtime::Handle::current()
+            .block_on(async { store.list().await }).unwrap_or_default();
+        Self { cfg, chat, side, input: InputPanel::new(), status: StatusBar::new("ready"),
+            focus: Focus::Input, thinking: false, interrupt: Arc::new(AtomicBool::new(false)), session_ids }
     }
 
     async fn run_loop(
@@ -127,14 +132,30 @@ self.chat.render(f, top_row[0], self.focus == Focus::Chat);
                                     self.chat.push_user("/help");
                                     self.chat.append_delta("Commands: /q quit, /h help, /s sessions, /c clear chat, /n new session");
                                 }
-                                "/c" | "/clear" => {
+"/c" | "/clear" => {
                                     self.chat = ChatPanel::new();
                                     self.chat.push(Line::from(Span::styled("chat cleared", Style::default().fg(Color::DarkGray))));
                                 }
                                 "/s" | "/sessions" => {
                                     self.chat.push_user("/sessions");
-                                    self.chat.append_delta("session: "); // simplified
+                                    let mut text = String::from("saved sessions:\n");
+                                    if self.session_ids.is_empty() { text.push_str("  (none)\n"); }
+                                    else { for id in &self.session_ids { text.push_str(&format!("  {}\n", &id[..8.min(id.len())])); }}
+                                    text.push_str("use /switch <id>");
+                                    self.chat.append_delta(&text);
                                 }
+                                "/switch" => {
+                                    self.chat.push_user("/switch");
+                                    self.chat.append_delta("restart with: vibe-agent resume <session-id>");
+                                }
+                                "/m" | "/model" => {
+                                    self.chat.push_user("/model");
+                                    self.chat.append_delta(&format!("model: {}\nbase_url: {}\napi_key: {}",
+                                        self.cfg.provider.model,
+                                        self.cfg.provider.base_url,
+                                        if self.cfg.provider.api_key.is_empty() {"(not set)"} else {"***"}));
+                                }
+                                "/switch" => { self.chat.push_user("/switch (not yet implemented)"); }
                                 _ => {
                                     self.chat.push_user(&cmd);
                                 }
