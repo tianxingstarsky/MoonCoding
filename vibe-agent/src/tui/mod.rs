@@ -24,6 +24,7 @@ mod input;
 mod markdown;
 mod side;
 mod status;
+mod syntax;
 use chat::ChatPanel;
 use input::InputPanel;
 use side::SidePanel;
