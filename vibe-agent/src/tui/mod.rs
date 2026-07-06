@@ -21,6 +21,7 @@ use crate::tools::ToolRegistry;
 
 mod chat;
 mod input;
+mod markdown;
 mod side;
 mod status;
 use chat::ChatPanel;
