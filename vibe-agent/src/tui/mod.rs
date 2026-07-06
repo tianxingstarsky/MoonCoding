@@ -141,7 +141,7 @@ impl App {
 
             while let Ok(ev) = rx.try_recv() { self.handle_event(ev); }
 
-            if event::poll(std::time::Duration::from_millis(80))? {
+            if event::poll(std::time::Duration::from_millis(20))? {
                 let Event::Key(key) = event::read()? else { continue };
                 if key.kind != KeyEventKind::Press { continue; }
 

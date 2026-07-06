@@ -42,6 +42,7 @@ impl ChatPanel {
     pub fn scroll_to_bottom(&mut self) { self.scroll = 0; }
     pub fn scroll_pos(&self) -> usize { self.scroll as usize }
     pub fn line_count(&self) -> usize { self.lines.len() }
+    fn auto_scroll(&mut self) { self.scroll = 0; }
     pub fn last_message_text(&self) -> String {
         let mut s = String::new();
         for line in &self.lines {
@@ -68,6 +69,7 @@ impl ChatPanel {
             tool_call: None, expanded: false,
         });
         self.current_assistant = None;
+        self.auto_scroll();
     }
     pub fn append_delta(&mut self, text: &str) {
         if let Some(ref mut cur) = self.current_assistant {
@@ -79,6 +81,7 @@ impl ChatPanel {
             self.current_assistant = Some(content.clone());
             self.lines.push(ChatLine { text: Line::from(Span::styled(content, Style::default().fg(TEXT))), tool_call: None, expanded: false });
         }
+        self.auto_scroll();
     }
     pub fn push_tool_start(&mut self, name: &str, args: &str) {
         self.current_assistant = None;
@@ -91,6 +94,7 @@ impl ChatPanel {
             tool_call: Some(ToolCallInfo { name: name.to_string(), exit_code: 0, full_output: String::new() }),
             expanded: false,
         });
+        self.auto_scroll();
     }
     pub fn push_tool_result(&mut self, name: &str, exit_code: i32, output: &str) {
         let code_color = if exit_code == 0 { SUCCESS } else { ERROR };
@@ -108,6 +112,7 @@ impl ChatPanel {
             ]),
             tool_call: None, expanded: false,
         });
+        self.auto_scroll();
     }
     pub fn push_error(&mut self, text: &str) {
         self.current_assistant = None;
@@ -115,6 +120,7 @@ impl ChatPanel {
             text: Line::from(Span::styled(text.to_string(), Style::default().fg(ERROR))),
             tool_call: None, expanded: false,
         });
+        self.auto_scroll();
     }
 
     pub fn render(&self, f: &mut Frame, area: Rect, focused: bool, spinner: &str, thinking: bool) {
