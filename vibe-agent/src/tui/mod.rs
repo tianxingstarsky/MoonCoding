@@ -1,7 +1,7 @@
 use anyhow::Result;
 use crossterm::{
     cursor,
-    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode},
 };
@@ -142,7 +142,17 @@ impl App {
             while let Ok(ev) = rx.try_recv() { self.handle_event(ev); }
 
             if event::poll(std::time::Duration::from_millis(20))? {
-                let Event::Key(key) = event::read()? else { continue };
+                let ev = event::read()?;
+                // ── mouse scroll ──
+                if let Event::Mouse(mouse) = &ev {
+                    match mouse.kind {
+                        MouseEventKind::ScrollUp => { self.chat.scroll_up(); }
+                        MouseEventKind::ScrollDown => { self.chat.scroll_down(); }
+                        _ => {}
+                    }
+                    continue;
+                }
+                let Event::Key(key) = ev else { continue };
                 if key.kind != KeyEventKind::Press { continue; }
 
                 match key.code {
