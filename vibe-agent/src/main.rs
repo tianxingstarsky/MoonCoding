@@ -5,6 +5,7 @@ mod provider;
 mod session;
 mod stream;
 mod tools;
+mod tui;
 
 use anyhow::Result;
 use colored::*;
@@ -60,31 +61,24 @@ fn main() {
 
 async fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
-    // 先处理 -C workdir 改变当前目录
+    let mut cmd = String::from("chat");
     let mut i = 1;
     while i < args.len() {
-        if args[i] == "-C" || args[i] == "--workdir" {
-            if let Some(dir) = args.get(i+1) {
-                std::env::set_current_dir(dir)?;
+        match args[i].as_str() {
+            "-C" | "--workdir" => {
+                if let Some(dir) = args.get(i+1) { std::env::set_current_dir(PathBuf::from(dir))?; }
+                i += 2;
             }
-            i += 2;
-        } else { i += 1; }
+            "--base-url" | "--model" | "--api-key" => { i += 2; }
+            s if !s.starts_with('-') => { cmd = s.to_string(); i += 1; }
+            _ => { i += 1; }
+        }
     }
     let root = find_project_root(&std::env::current_dir().unwrap_or_default());
     std::env::set_current_dir(&root)?;
     let mut cfg = Config::load(&root)?;
 
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--base-url" => { cfg.provider.base_url = args.get(i+1).cloned().unwrap_or_default(); i += 2; }
-            "--model"   => { cfg.provider.model = args.get(i+1).cloned().unwrap_or_default(); i += 2; }
-            "--api-key" => { cfg.provider.api_key = args.get(i+1).cloned().unwrap_or_default(); i += 2; }
-            _ => { i += 1; }
-        }
-    }
-
-    if cfg.provider.api_key.is_empty() {
+    if cfg.provider.api_key.is_empty() && cmd != "tui" {
         eprintln!("{}  Set {}", "WARN".yellow().bold(), "MOONCODING_API_KEY".cyan());
         eprintln!("   or pass --api-key <key>");
     }
@@ -97,6 +91,7 @@ async fn run() -> Result<()> {
         "list"   => cmd_list(&session_store).await,
         "resume" => cmd_resume(args.get(2).cloned().unwrap_or_default(), &cfg, &tools, &session_store).await,
         "new"    => cmd_new_session(&cfg, &tools, &session_store).await,
+        "tui"    => cmd_tui(cfg, tools, session_store).await,
         _        => cmd_chat(&cfg, &tools, &session_store).await,
     }
 }
@@ -135,6 +130,10 @@ async fn cmd_new_session(cfg: &Config, tools: &ToolRegistry, store: &dyn Session
     let id = uuid::Uuid::new_v4().to_string();
     print_welcome(cfg, &id, false, store).await;
     repl_loop(cfg, tools, store, &id).await
+}
+
+async fn cmd_tui(cfg: Config, tools: ToolRegistry, store: SqliteStore) -> Result<()> {
+    tui::run(Arc::new(cfg), Arc::new(tools), Arc::new(store)).await
 }
 
 // ── REPL ──
