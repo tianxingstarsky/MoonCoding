@@ -28,6 +28,7 @@ impl InputPanel {
     pub fn cursor_left(&mut self) { if self.cursor > 0 { self.cursor -= 1; } }
     pub fn cursor_right(&mut self) { if self.cursor < self.buffer.len() { self.cursor += 1; } }
     pub fn cursor_home(&mut self) { self.cursor = 0; }
+    pub fn cursor_end(&mut self) { self.cursor = self.buffer.len(); }
     pub fn delete(&mut self) {
         if self.cursor < self.buffer.len() {
             self.buffer.remove(self.cursor);

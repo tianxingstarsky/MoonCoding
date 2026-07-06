@@ -127,6 +127,12 @@ terminal.draw(|f| {
                     KeyCode::Char('j') | KeyCode::Down => { self.chat.scroll_down(); }
                     KeyCode::Char('k') | KeyCode::Up => { self.chat.scroll_up(); }
                     KeyCode::Char('g') => { self.chat.scroll_to_bottom(); }
+                    KeyCode::Char(' ') => {
+                        // toggle expand on the tool line at scroll position
+                        let scroll_pos = self.chat.scroll_pos();
+                        let idx = self.chat.line_count().saturating_sub(1 + scroll_pos);
+                        self.chat.toggle_line(idx);
+                    }
                     KeyCode::Char(c) => { self.input.push_char(c); }
                     KeyCode::Backspace => { self.input.backspace(); }
                     KeyCode::Delete => { self.input.delete(); }
