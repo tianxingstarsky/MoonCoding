@@ -123,29 +123,41 @@ pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn Sess
         if event::poll(std::time::Duration::from_millis(20))? {
             match event::read()? {
                 Event::Key(key) if key.kind==KeyEventKind::Press => match key.code {
-                    KeyCode::Esc => { if inp.cmd { inp.cmd=false; inp.buf.clear(); inp.cur=0; } else { break; } }
+                    KeyCode::Esc => { if inp.cmd { inp.cmd=false; inp.buf.clear(); inp.cur=0; } }
                     KeyCode::Enter => {
                         if inp.cmd {
                             let cmd = inp.take(); inp.cmd = false;
                             match cmd.trim() {
-                                "/q"|"/quit"|"/exit" => break,
+                                "/exit"|"/q"|"/quit" => break,
                                 "/c"|"/clear" => { execute!(out, Clear(ClearType::All))?; }
                                 "/h"|"/help" => {
                                     let mut o = stdout();
-                                    execute!(o, clr(ACC))?; writeln!(o, "  [1] /models         show available models")?;
-                                    execute!(o, clr(ACC))?; writeln!(o, "  [2] /use <n>       switch model")?;
-                                    execute!(o, clr(ACC))?; writeln!(o, "  [3] /clear          clear chat")?;
-                                    execute!(o, clr(ACC))?; writeln!(o, "  [4] /status         show session info")?;
-                                    execute!(o, clr(ACC))?; writeln!(o, "  [5] /key <sk-...>   set api key")?;
-                                    execute!(o, clr(ACC))?; writeln!(o, "  [6] /quit           exit")?;
+                                    execute!(o, clr(ACC))?; writeln!(o, "  [1] /model           show & pick models")?;
+                                    execute!(o, clr(ACC))?; writeln!(o, "  [2] /key <sk-...>    set api key")?;
+                                    execute!(o, clr(ACC))?; writeln!(o, "  [3] /status          show session")?;
+                                    execute!(o, clr(ACC))?; writeln!(o, "  [4] /clear           clear screen")?;
+                                    execute!(o, clr(ACC))?; writeln!(o, "  [5] /exit /quit      quit")?;
+                                    execute!(o, clr(MUTED))?; writeln!(o, "  keys: ctrl+p = interrupt, ctrl+c = copy (native)")?;
                                     execute!(o, ResetColor)?; o.flush()?;
                                 }
-                                "/models" => {
+                                "/model" | "/models" => {
                                     let mut o = stdout();
-                                    execute!(o, clr(TXT))?; writeln!(o, "  1  deepseek-chat      (latest)")?;
-                                    execute!(o, clr(TXT))?; writeln!(o, "  2  deepseek-v4-flash  (fast)")?;
-                                    execute!(o, clr(TXT))?; writeln!(o, "  3  deepseek-reasoner  (R1)")?;
-                                    execute!(o, clr(TXT))?; writeln!(o, "  type /use <n> to switch")?;
+                                    let models = vec![
+                                        ("1", "deepseek-chat",       "latest"),
+                                        ("2", "deepseek-v4-flash",   "fast"),
+                                        ("3", "deepseek-reasoner",   "R1"),
+                                        ("4", "gpt-4o",              "OpenAI"),
+                                        ("5", "gpt-4o-mini",         "OpenAI mini"),
+                                        ("6", "claude-3.5-sonnet",   "Anthropic"),
+                                        ("7", "llama-3.1-70b",       "Meta (Groq)"),
+                                    ];
+                                    execute!(o, clr(TXT))?; writeln!(o, "  available models:")?;
+                                    for (n, name, tag) in &models {
+                                        execute!(o, clr(ACC))?; write!(o, "  [{}] ", n)?;
+                                        execute!(o, clr(TXT))?; write!(o, "{}", name)?;
+                                        execute!(o, clr(MUTED))?; writeln!(o, "  {}", tag)?;
+                                    }
+                                    execute!(o, clr(MUTED))?; writeln!(o, "  type /use <n> or /use <name> to pick")?;
                                     execute!(o, ResetColor)?; o.flush()?;
                                 }
                                 s if s.starts_with("/use ") => {
@@ -153,6 +165,10 @@ pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn Sess
                                         "1"|"deepseek-chat" => "deepseek-chat",
                                         "2"|"deepseek-v4-flash"|"v4-flash" => "deepseek-v4-flash",
                                         "3"|"deepseek-reasoner"|"reasoner"|"r1" => "deepseek-reasoner",
+                                        "4"|"gpt-4o" => "gpt-4o",
+                                        "5"|"gpt-4o-mini" => "gpt-4o-mini",
+                                        "6"|"claude-3.5-sonnet"|"claude"|"sonnet" => "claude-3.5-sonnet",
+                                        "7"|"llama-3.1-70b"|"llama" => "llama-3.1-70b",
                                         other => other,
                                     };
                                     let mut c = (*cfg).clone(); c.provider.model = model.to_string();
@@ -203,20 +219,16 @@ pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn Sess
                         });
                     }
                     KeyCode::Char('/') if !inp.cmd => { inp.cmd=true; inp.buf="/".into(); inp.cur=1; }
-                    KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        if let Ok(mut cl)=arboard::Clipboard::new() { if let Ok(t)=cl.get_text() { for ch in t.chars() { inp.push(ch); } } }
-                    }
-                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         crate::agent::INTERRUPTED.store(true, Ordering::SeqCst);
+                        let mut o = stdout();
+                        execute!(o, clr(WARN))?; writeln!(o, "  interrupted")?;
+                        execute!(o, ResetColor)?; o.flush()?;
                         status = "interrupted".into();
+                        thinking = false;
                     }
                     KeyCode::Char(c) => { inp.push(c); }
                     KeyCode::Backspace => { inp.bs(); }
-                    KeyCode::Delete => { inp.del(); }
-                    KeyCode::Left => { inp.left(); }
-                    KeyCode::Right => { inp.right(); }
-                    KeyCode::Home => { inp.home(); }
-                    KeyCode::End => { inp.end(); }
                     _ => {}
                 },
                 _ => {}
@@ -265,7 +277,7 @@ fn render_bottom(out: &mut impl Write, top: u16, inp: &Input, status: &str, thin
         clr(STATUS_BG), Print(" ".repeat(w)),
         cursor::MoveTo(1, top+3),
         clr(TXT), Print(&st),
-        clr(MUTED), Print("  wheel▌jk▌/ cmd▌space▌tab▌y copy▌ctrl+c stop▌esc quit"),
+        clr(MUTED), Print("  /help  ·  /model  ·  ctrl+p interrupt  ·  ctrl+c copy  ·  /exit quit"),
         ResetColor,
     )?;
     out.flush()?;
