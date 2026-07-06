@@ -21,6 +21,8 @@ pub struct ChatPanel {
     lines: Vec<ChatLine>,
     scroll: u16,
     current_assistant: Option<String>,
+    auto_scroll: bool,       // true = follow bottom, false = user scrolled away
+    total_line_count: usize, // rendered line count for scrollbar
 }
 #[derive(Clone)]
 pub struct ChatLine {
@@ -36,13 +38,13 @@ pub struct ToolCallInfo {
 }
 
 impl ChatPanel {
-    pub fn new() -> Self { Self { lines: Vec::new(), scroll: 0, current_assistant: None } }
-    pub fn scroll_up(&mut self) { self.scroll = self.scroll.saturating_add(1); }
-    pub fn scroll_down(&mut self) { self.scroll = self.scroll.saturating_sub(1); }
-    pub fn scroll_to_bottom(&mut self) { self.scroll = 0; }
+    pub fn new() -> Self { Self { lines: Vec::new(), scroll: 0, current_assistant: None, auto_scroll: true, total_line_count: 0 } }
+    pub fn scroll_up(&mut self) { self.scroll = self.scroll.saturating_add(1); self.auto_scroll = false; }
+    pub fn scroll_down(&mut self) { self.scroll = self.scroll.saturating_sub(1); if self.scroll == 0 { self.auto_scroll = true; } }
+    pub fn scroll_to_bottom(&mut self) { self.scroll = 0; self.auto_scroll = true; }
     pub fn scroll_pos(&self) -> usize { self.scroll as usize }
     pub fn line_count(&self) -> usize { self.lines.len() }
-    fn auto_scroll(&mut self) { self.scroll = 0; }
+    fn auto_scroll_to_bottom(&mut self) { if self.auto_scroll { self.scroll = 0; } }
     pub fn last_message_text(&self) -> String {
         let mut s = String::new();
         for line in &self.lines {
@@ -69,7 +71,7 @@ impl ChatPanel {
             tool_call: None, expanded: false,
         });
         self.current_assistant = None;
-        self.auto_scroll();
+        self.auto_scroll_to_bottom();
     }
     pub fn append_delta(&mut self, text: &str) {
         if let Some(ref mut cur) = self.current_assistant {
@@ -81,7 +83,7 @@ impl ChatPanel {
             self.current_assistant = Some(content.clone());
             self.lines.push(ChatLine { text: Line::from(Span::styled(content, Style::default().fg(TEXT))), tool_call: None, expanded: false });
         }
-        self.auto_scroll();
+        self.auto_scroll_to_bottom();
     }
     pub fn push_tool_start(&mut self, name: &str, args: &str) {
         self.current_assistant = None;
@@ -94,7 +96,7 @@ impl ChatPanel {
             tool_call: Some(ToolCallInfo { name: name.to_string(), exit_code: 0, full_output: String::new() }),
             expanded: false,
         });
-        self.auto_scroll();
+        self.auto_scroll_to_bottom();
     }
     pub fn push_tool_result(&mut self, name: &str, exit_code: i32, output: &str) {
         let code_color = if exit_code == 0 { SUCCESS } else { ERROR };
@@ -112,7 +114,7 @@ impl ChatPanel {
             ]),
             tool_call: None, expanded: false,
         });
-        self.auto_scroll();
+        self.auto_scroll_to_bottom();
     }
     pub fn push_error(&mut self, text: &str) {
         self.current_assistant = None;
@@ -120,10 +122,10 @@ impl ChatPanel {
             text: Line::from(Span::styled(text.to_string(), Style::default().fg(ERROR))),
             tool_call: None, expanded: false,
         });
-        self.auto_scroll();
+        self.auto_scroll_to_bottom();
     }
 
-    pub fn render(&self, f: &mut Frame, area: Rect, focused: bool, spinner: &str, thinking: bool) {
+    pub fn render(&mut self, f: &mut Frame, area: Rect, focused: bool, spinner: &str, thinking: bool) {
         let mut display_lines: Vec<Line> = Vec::new();
         for line in &self.lines {
             let raw: String = line.text.spans.iter().map(|s| s.content.as_ref()).collect::<Vec<&str>>().join("");
@@ -158,12 +160,23 @@ impl ChatPanel {
             )));
         }
 
-        let title = if focused { " chat " } else { " chat " };
+        self.total_line_count = display_lines.len();
+        let visible = area.height.saturating_sub(2) as usize; // border takes 2 rows
+        let max_scroll = self.total_line_count.saturating_sub(visible);
+        let effective_scroll = if self.auto_scroll { max_scroll } else { self.scroll as usize };
+        let effective_scroll = effective_scroll.min(max_scroll);
+
+        let scroll_pct = if self.total_line_count == 0 { 0 } else { (effective_scroll * 100 / self.total_line_count) };
+
+        let title = format!("{}{}", if focused { "" } else { "" }, " chat ");
+        let title = if self.total_line_count > visible {
+            format!("{} {}% {} ", title, scroll_pct, if self.auto_scroll {"[bottom]"} else {"↑"})
+        } else { title.to_string() };
         let border_color = if focused { BORDER_ACT } else { BORDER };
         let chat = Paragraph::new(display_lines)
             .block(Block::default().borders(Borders::ALL).title(title).border_style(Style::default().fg(border_color)).style(Style::default().bg(BG)))
             .wrap(Wrap { trim: false })
-            .scroll((self.scroll, 0));
+            .scroll((effective_scroll as u16, 0));
         f.render_widget(chat, area);
     }
 }
