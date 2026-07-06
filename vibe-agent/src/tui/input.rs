@@ -5,6 +5,11 @@ use ratatui::{
     Frame,
 };
 
+const BG:        Color = Color::Rgb(10, 10, 10);
+const BORDER:    Color = Color::Rgb(50, 50, 50);
+const BORDER_ACT:Color = Color::Rgb(96, 96, 96);
+const TEXT:       Color = Color::Rgb(224, 224, 224);
+
 pub struct InputPanel {
     pub buffer: String,
     pub cursor: usize,     // char position, not byte
@@ -20,10 +25,7 @@ impl InputPanel {
         else { self.buffer.clear(); self.cursor = 0; }
     }
 
-    /// char count
     fn len_chars(&self) -> usize { self.buffer.chars().count() }
-
-    /// byte offset for char position `idx`
     fn byte_of(&self, idx: usize) -> usize {
         self.buffer.char_indices().nth(idx).map(|(i,_)| i).unwrap_or(self.buffer.len())
     }
@@ -36,10 +38,10 @@ impl InputPanel {
 
     pub fn backspace(&mut self) {
         if self.cursor > 0 {
-            let prev_idx = self.cursor - 1;
-            let byte_pos = self.byte_of(prev_idx);
+            let prev = self.cursor - 1;
+            let byte_pos = self.byte_of(prev);
             self.buffer.remove(byte_pos);
-            self.cursor = prev_idx;
+            self.cursor = prev;
         }
     }
 
@@ -65,17 +67,16 @@ impl InputPanel {
         let chars: Vec<char> = self.buffer.chars().collect();
         let mut s = String::with_capacity(chars.len() + 2);
         for (i, c) in chars.iter().enumerate() {
-            if i == self.cursor { s.push('█'); }
+            if i == self.cursor { s.push('▌'); }
             s.push(*c);
         }
-        if self.cursor >= chars.len() { s.push('█'); }
+        if self.cursor >= chars.len() { s.push('▌'); }
 
-        let title = if self.command_mode { " / cmd " } else { " moon> " };
-        let title = if focused { format!("[{}]", title.trim()) } else { title.to_string() };
-        let border_style = if focused { Style::default().fg(Color::Cyan) } else { Style::default() };
+        let title = if self.command_mode { " / " } else { " input " };
+        let border_color = if focused { BORDER_ACT } else { BORDER };
         let input = Paragraph::new(s)
-            .block(Block::default().borders(Borders::ALL).title(title).border_style(border_style))
-            .style(Style::default().fg(Color::White));
+            .block(Block::default().borders(Borders::ALL).title(title).border_style(Style::default().fg(border_color)).style(Style::default().bg(BG)))
+            .style(Style::default().fg(TEXT).bg(BG));
         f.render_widget(input, area);
     }
 }

@@ -154,7 +154,7 @@ impl OpenAiCompatible {
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            return Err(anyhow!("http {}: {}", status, text));
+            return Err(anyhow!("{} {}  model={}  url={}  body={}", status, text, self.model, url, serde_json::to_string(&body).unwrap_or_default()));
         }
 
         let mut stream = resp.bytes_stream();
