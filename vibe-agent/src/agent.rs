@@ -71,12 +71,12 @@ pub async fn run_agent(
             .with_session_context(&format!("step {}/{}", step, max_steps))
             .build();
 
-        // 注入 system prompt 到第一条消息 (替换旧的)
-        if let Some(first) = session.messages.first_mut() {
-            if first.role == "system" { first.content = Some(system_prompt.clone()); }
-        } else {
-            session.messages.insert(0, Message { role: "system".to_string(), content: Some(system_prompt), tool_calls: None, tool_call_id: None });
+        // 注入 system prompt padding
+        match session.messages.first() {
+            Some(m) if m.role == "system" => { session.messages[0].content = Some(system_prompt.clone()); }
+            _ => { session.messages.insert(0, Message { role: "system".to_string(), content: Some(system_prompt), tool_calls: None, tool_call_id: None }); }
         }
+
 
         // ── 调用 LLM ──
         let mut assistant_text = String::new();

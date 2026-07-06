@@ -180,7 +180,12 @@ impl App {
                         let tx2 = tx.clone(); let tools2 = tools.clone(); let store2 = store.clone();
                         let cfg2 = self.cfg.clone(); let sid = uuid::Uuid::new_v4().to_string();
                         let interrupt2 = self.interrupt.clone();
+                        let has_key = !cfg2.provider.api_key.is_empty();
                         std::thread::spawn(move || {
+                            if !has_key {
+                                tx2.send(AgentEvent::Error("api_key is empty".into())).ok();
+                                return;
+                            }
                             let rt = tokio::runtime::Runtime::new().unwrap();
                             rt.block_on(async {
                                 let _ = crate::agent::run_agent(&cfg2, &tools2, store2.as_ref(), &prompt, &sid,
