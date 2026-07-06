@@ -93,6 +93,12 @@ impl App {
             Span::raw(" · "),
             Span::styled(model, Style::default().fg(TEXT)),
         ]));
+        if cfg.provider.api_key.is_empty() {
+            chat.push(Line::from(Span::styled(
+                "API KEY NOT SET — use $env:DEEPSEEK_API_KEY='sk-...' in powershell, or launch via `python launch.py`",
+                Style::default().fg(ERROR).add_modifier(Modifier::BOLD),
+            )));
+        }
         let mut side = SidePanel::new(" session ");
         side.set_entries(vec![
             ("model".into(), cfg.provider.model.clone()),
