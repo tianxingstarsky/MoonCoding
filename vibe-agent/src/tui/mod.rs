@@ -11,6 +11,7 @@ use ratatui::{
     text::{Line, Span},
     Terminal,
 };
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 
 use crate::config::Config;
@@ -26,6 +27,9 @@ use chat::ChatPanel;
 use input::InputPanel;
 use side::SidePanel;
 use status::StatusBar;
+
+#[derive(Clone, Copy, PartialEq)]
+enum Focus { Input, Chat, Side }
 
 pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn SessionStore>) -> Result<()> {
     enable_raw_mode()?;
@@ -49,7 +53,9 @@ pub struct App {
     pub side: SidePanel,
     pub input: InputPanel,
     pub status: StatusBar,
+    pub focus: Focus,
     pub thinking: bool,
+    pub interrupt: Arc<AtomicBool>,
 }
 
 impl App {
@@ -66,7 +72,7 @@ impl App {
             ("provider".into(), cfg.provider.base_url.clone()),
             ("steps".into(), cfg.agent.max_steps.unwrap_or(40).to_string()),
         ]);
-        Self { cfg, chat, side, input: InputPanel::new(), status: StatusBar::new("ready"), thinking: false }
+        Self { cfg, chat, side, input: InputPanel::new(), status: StatusBar::new("ready"), focus: Focus::Input, thinking: false, interrupt: Arc::new(AtomicBool::new(false)) }
     }
 
     async fn run_loop(
@@ -89,9 +95,9 @@ terminal.draw(|f| {
                     .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
                     .split(main_chunks[0]);
 
-                self.chat.render(f, top_row[0]);
-                self.side.render(f, top_row[1]);
-                self.input.render(f, main_chunks[1]);
+self.chat.render(f, top_row[0], self.focus == Focus::Chat);
+                self.side.render(f, top_row[1], self.focus == Focus::Side);
+                self.input.render(f, main_chunks[1], self.focus == Focus::Input);
                 self.status.render(f, main_chunks[2]);
             })?;
 
@@ -140,23 +146,38 @@ terminal.draw(|f| {
                         self.thinking = true;
 
                         let tx2 = tx.clone();
-                        let tools2 = tools.clone();
+let tool2 = tools.clone();
                         let store2 = store.clone();
                         let cfg2 = self.cfg.clone();
                         let sid = uuid::Uuid::new_v4().to_string();
+                        let interrupt2 = self.interrupt.clone();
                         std::thread::spawn(move || {
                             let rt = tokio::runtime::Runtime::new().unwrap();
                             rt.block_on(async {
                                 let _ = crate::agent::run_agent(
-                                    &cfg2, &tools2, store2.as_ref(), &prompt, &sid,
-                                    &mut |ev| { tx2.send(ev).ok(); },
+                                    &cfg2, &tool2, store2.as_ref(), &prompt, &sid,
+                                    &mut |ev| {
+                                        if !interrupt2.load(Ordering::SeqCst) { tx2.send(ev).ok(); }
+                                    },
                                 ).await;
                             });
                         });
                     }
-                    KeyCode::Char('j') | KeyCode::Down => { self.chat.scroll_down(); }
-                    KeyCode::Char('k') | KeyCode::Up => { self.chat.scroll_up(); }
-                    KeyCode::Char('g') => { self.chat.scroll_to_bottom(); }
+KeyCode::Tab => {
+                        self.focus = match self.focus {
+                            Focus::Input => Focus::Chat,
+                            Focus::Chat => Focus::Side,
+                            Focus::Side => Focus::Input,
+                        };
+                    }
+                    KeyCode::Char('c') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                        self.interrupt.store(true, Ordering::SeqCst);
+                        crate::agent::INTERRUPTED.store(true, Ordering::SeqCst);
+                        self.status.set("interrupted  (type new prompt)");
+                    }
+                    KeyCode::Char('j') | KeyCode::Down if self.focus == Focus::Chat => { self.chat.scroll_down(); }
+                    KeyCode::Char('k') | KeyCode::Up if self.focus == Focus::Chat => { self.chat.scroll_up(); }
+                    KeyCode::Char('g') if self.focus == Focus::Chat => { self.chat.scroll_to_bottom(); }
                     KeyCode::Char(' ') => {
                         // toggle expand on the tool line at scroll position
                         let scroll_pos = self.chat.scroll_pos();

@@ -49,7 +49,7 @@ impl InputPanel {
         s
     }
 
-    pub fn render(&self, f: &mut Frame, area: Rect) {
+    pub fn render(&self, f: &mut Frame, area: Rect, focused: bool) {
         let display = if self.buffer.is_empty() {
             "█".to_string()
         } else {
@@ -60,8 +60,10 @@ impl InputPanel {
             s
         };
         let title = if self.command_mode { " / cmd " } else { " moon> " };
+        let title = if focused { format!("[{}]", title.trim()) } else { title.to_string() };
+        let border_style = if focused { Style::default().fg(Color::Cyan) } else { Style::default() };
         let input = Paragraph::new(display.as_str())
-            .block(Block::default().borders(Borders::ALL).title(title))
+            .block(Block::default().borders(Borders::ALL).title(title).border_style(border_style))
             .style(Style::default().fg(Color::White));
         f.render_widget(input, area);
     }

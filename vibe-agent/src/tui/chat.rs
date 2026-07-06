@@ -123,10 +123,10 @@ impl ChatPanel {
         });
     }
 
-    pub fn render(&self, f: &mut Frame, area: Rect) {
+pub fn render(&self, f: &mut Frame, area: Rect, focused: bool) {
         let mut display_lines: Vec<Line> = Vec::new();
         for line in &self.lines {
-let row = line.text.clone();
+            let row = line.text.clone();
             let mut spans: Vec<Span> = Vec::new();
             if line.tool_call.is_some() {
                 let mark = if line.expanded { "[-]" } else { "[+]" };
@@ -147,8 +147,10 @@ let row = line.text.clone();
             }
         }
 
+        let title = if focused { " [chat] " } else { " chat " };
+        let border_style = if focused { Style::default().fg(Color::Cyan) } else { Style::default() };
         let chat = Paragraph::new(display_lines)
-            .block(Block::default().borders(Borders::ALL).title(" chat "))
+            .block(Block::default().borders(Borders::ALL).title(title).border_style(border_style))
             .wrap(Wrap { trim: false })
             .scroll((self.scroll, 0));
         f.render_widget(chat, area);

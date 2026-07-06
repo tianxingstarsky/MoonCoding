@@ -1,5 +1,9 @@
 use anyhow::Result;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
+
+/// 全局中断标记——TUI 按 Ctrl+C 时置 true, agent 循环顶部检查
+pub static INTERRUPTED: AtomicBool = AtomicBool::new(false);
 
 use crate::config::Config;
 use crate::provider::{Message, OpenAiCompatible, ParsedToolCall, StreamEvent, ToolCall};
@@ -21,6 +25,7 @@ pub async fn run_agent(
     session_id: &str,
     on_event: &mut dyn FnMut(AgentEvent),
 ) -> Result<()> {
+    INTERRUPTED.store(false, Ordering::SeqCst);
     on_event(AgentEvent::Thinking);
 
     let provider = OpenAiCompatible::new(
@@ -50,6 +55,10 @@ pub async fn run_agent(
     let mut step = session.step;
 
     loop {
+        if INTERRUPTED.load(Ordering::SeqCst) {
+            on_event(AgentEvent::Interrupted("user interrupted".into()));
+            break;
+        }
         if step >= max_steps {
             on_event(AgentEvent::Interrupted(format!("max_steps={}", max_steps)));
             break;
