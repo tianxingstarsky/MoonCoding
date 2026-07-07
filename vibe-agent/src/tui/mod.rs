@@ -2,16 +2,18 @@ use anyhow::Result;
 use crossterm::{
     execute,
     style::{Color as CColor, Print, ResetColor, SetForegroundColor},
-    terminal::Clear,
-    terminal::ClearType,
+    terminal::{Clear, ClearType},
 };
 use std::io::{stdout, BufRead, Write};
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, Mutex};
+use std::time::Duration;
 
 use crate::config::Config;
 use crate::session::SessionStore;
 use crate::stream::AgentEvent;
 use crate::tools::ToolRegistry;
+mod markdown;
+mod syntax;
 
 const ACC:   CColor = CColor::Rgb { r: 92,  g: 156, b: 245 };
 const TXT:   CColor = CColor::Rgb { r: 224, g: 224, b: 224 };
@@ -21,9 +23,10 @@ const ERR:   CColor = CColor::Rgb { r: 224, g: 80,  b: 80 };
 
 fn clr(c: CColor) -> SetForegroundColor { SetForegroundColor(c) }
 
+static MODEL_CACHE: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
 pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn SessionStore>) -> Result<()> {
     let mut out = stdout();
-
     execute!(out, clr(ACC))?; write!(out, "vibe-agent")?;
     execute!(out, clr(TXT))?; writeln!(out, " · {}", cfg.provider.model)?;
     execute!(out, ResetColor)?; out.flush()?;
@@ -34,62 +37,69 @@ pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn Sess
     let mut agent_thread: Option<std::thread::JoinHandle<()>> = None;
 
     loop {
+        // ── drain any pending events ──
         while let Ok(ev) = rx.try_recv() { show(&ev)?; }
 
+        // ── join finished agent ──
         if let Some(h) = agent_thread.take() {
             let _ = h.join();
             while let Ok(ev) = rx.try_recv() { show(&ev)?; }
         }
 
+        // ── prompt ──
         execute!(out, clr(ACC))?; write!(out, "vibe-agent> ")?;
         execute!(out, ResetColor)?; out.flush()?;
 
         let line = match lines.next() {
             Some(Ok(l)) => l.trim().to_string(),
-            Some(Err(_)) | None => break,
+            _ => break,
         };
         if line.is_empty() { continue; }
 
+        // ── built-in commands ──
         match line.as_str() {
             "/exit" | "/quit" | "/q" => break,
             "/model" | "/models" => {
-                for (n, name) in [("1","deepseek-chat"),("2","deepseek-v4-flash"),("3","deepseek-reasoner"),
-                    ("4","gpt-4o"),("5","gpt-4o-mini"),("6","claude-3.5-sonnet"),("7","llama-3.1-70b")] {
-                    execute!(out, clr(ACC))?; write!(out, "  [{}] ", n)?;
+                let models = fetch_models(&cfg.provider.base_url, &cfg.provider.api_key).await;
+                *MODEL_CACHE.lock().unwrap() = models.clone();
+                for (i, name) in models.iter().enumerate() {
+                    execute!(out, clr(ACC))?; write!(out, "  [{}] ", i+1)?;
                     execute!(out, clr(TXT))?; writeln!(out, "{}", name)?;
                 }
+                execute!(out, clr(MUTED))?; writeln!(out, "  type a number to pick")?;
                 execute!(out, ResetColor)?; out.flush()?;
                 continue;
             }
-            "/help" | "/h" => {
-                execute!(out, clr(TXT))?; writeln!(out, "  /model  /key  /status  /clear  /exit")?;
-                execute!(out, clr(TXT))?; writeln!(out, "  type a number to pick model, e.g. 2")?;
+            "/help" => {
+                execute!(out, clr(TXT))?; writeln!(out, "  /model /key /status /clear /exit")?;
                 execute!(out, ResetColor)?; out.flush()?;
                 continue;
             }
             s if s.len() <= 2 && s.chars().all(|c| c.is_ascii_digit()) => {
-                let model = match s { "1"=>"deepseek-chat","2"=>"deepseek-v4-flash","3"=>"deepseek-reasoner",
-                    "4"=>"gpt-4o","5"=>"gpt-4o-mini","6"=>"claude-3.5-sonnet","7"=>"llama-3.1-70b", _=>"" };
-                if !model.is_empty() {
-                    execute!(out, clr(OK))?; writeln!(out, "  model => {} (restart to apply)", model)?;
-                    execute!(out, ResetColor)?; out.flush()?;
+                let idx = s.parse::<usize>().unwrap_or(0);
+                let cache = MODEL_CACHE.lock().unwrap();
+                if idx > 0 && idx <= cache.len() {
+                    execute!(out, clr(OK))?; writeln!(out, "  model => {} (restart to apply)", cache[idx-1])?;
+                } else {
+                    execute!(out, clr(ERR))?; writeln!(out, "  invalid number, run /model first")?;
                 }
+                execute!(out, ResetColor)?; out.flush()?;
                 continue;
             }
             s if s.starts_with("/key ") => {
-                let key = s.trim_start_matches("/key ").trim();
-                if key.len() > 10 { execute!(out, clr(OK))?; writeln!(out, "  key set")?; }
-                else { execute!(out, clr(ERR))?; writeln!(out, "  key too short")?; }
+                execute!(out, clr(OK))?; writeln!(out, "  key set")?;
                 execute!(out, ResetColor)?; out.flush()?;
                 continue;
             }
             "/status" => {
-                execute!(out, clr(TXT))?; writeln!(out, "  model: {}  key: {}", cfg.provider.model,
-                    if cfg.provider.api_key.is_empty() {"(none)"} else {"***"})?;
+                execute!(out, clr(TXT))?; writeln!(out, "  model: {}", cfg.provider.model)?;
                 execute!(out, ResetColor)?; out.flush()?;
                 continue;
             }
-            "/clear" => { execute!(out, Clear(ClearType::All))?; out.flush()?; continue; }
+            "/clear" => {
+                execute!(out, Clear(ClearType::All))?; out.flush()?;
+                continue;
+            }
             prompt => {
                 let tx2 = tx.clone(); let t2 = tools.clone(); let s2 = store.clone();
                 let c2 = cfg.clone(); let sid = uuid::Uuid::new_v4().to_string();
@@ -111,7 +121,15 @@ pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn Sess
 fn show(ev: &AgentEvent) -> Result<()> {
     let mut o = stdout();
     match ev {
-        AgentEvent::TextDelta(t) => { execute!(o, clr(TXT))?; write!(o, "{}", t)?; o.flush()?; }
+        AgentEvent::TextDelta(t) => {
+            for line in markdown::render_markdown(t) {
+                for span in line.spans {
+                    write!(o, "{}", span.content)?;
+                }
+                writeln!(o)?;
+            }
+            o.flush()?;
+        }
         AgentEvent::TextDone { .. } => { writeln!(o)?; execute!(o, ResetColor)?; o.flush()?; }
         AgentEvent::ToolCallStart { name, input, .. } => {
             let p: String = input.chars().take(80).collect();
@@ -140,4 +158,28 @@ fn show(ev: &AgentEvent) -> Result<()> {
         _ => {}
     }
     Ok(())
+}
+
+/// 从 OpenAI 兼容 API 的 /models 端点获取真实模型列表
+async fn fetch_models(base_url: &str, api_key: &str) -> Vec<String> {
+    let url = format!("{}/models", base_url.trim_end_matches('/'));
+    let client = reqwest::Client::new();
+    let mut req = client.get(&url);
+    if !api_key.is_empty() {
+        req = req.header("Authorization", format!("Bearer {}", api_key));
+    }
+    match req.send().await {
+        Ok(resp) => {
+            let body: serde_json::Value = resp.json().await.unwrap_or_default();
+            if let Some(arr) = body.get("data").and_then(|d| d.as_array()) {
+                arr.iter()
+                    .filter_map(|m| m.get("id").and_then(|id| id.as_str()))
+                    .map(|s| s.to_string())
+                    .collect()
+            } else {
+                Vec::new()
+            }
+        }
+        Err(_) => Vec::new(),
+    }
 }
