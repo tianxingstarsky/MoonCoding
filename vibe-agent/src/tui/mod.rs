@@ -29,6 +29,7 @@ pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn Sess
     let mut out = stdout();
     execute!(out, clr(ACC))?; write!(out, "vibe-agent")?;
     execute!(out, clr(TXT))?; writeln!(out, " · {}", cfg.provider.model)?;
+    execute!(out, clr(MUTED))?; writeln!(out, "type /help for commands, or ask anything")?;
     execute!(out, ResetColor)?; out.flush()?;
 
     let (tx, rx) = mpsc::channel::<AgentEvent>();
@@ -74,7 +75,15 @@ pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn Sess
                 continue;
             }
             "/help" => {
-                execute!(out, clr(TXT))?; writeln!(out, "  /model /key /status /clear /exit")?;
+                execute!(out, clr(ACC))?; writeln!(out, "  commands:")?;
+                execute!(out, clr(TXT))?;  writeln!(out, "  /model        list available models from API")?;
+                execute!(out, clr(TXT))?;  writeln!(out, "  <number>      pick a model by number (after /model)")?;
+                execute!(out, clr(TXT))?;  writeln!(out, "  /status       show current model & config")?;
+                execute!(out, clr(TXT))?;  writeln!(out, "  /key <sk-..>  set API key")?;
+                execute!(out, clr(TXT))?;  writeln!(out, "  /clear        clear screen")?;
+                execute!(out, clr(TXT))?;  writeln!(out, "  /exit         quit")?;
+                execute!(out, clr(MUTED))?; writeln!(out, "  anything else is sent to the AI agent")?;
+                execute!(out, clr(MUTED))?; writeln!(out, "  ctrl+c = exit  ·  ctrl+d = exit")?;
                 execute!(out, ResetColor)?; out.flush()?;
                 continue;
             }
