@@ -144,13 +144,7 @@ fn show(ev: &AgentEvent) -> Result<()> {
     let mut o = stdout();
     match ev {
         AgentEvent::TextDelta(t) => {
-            for line in markdown::render_markdown(t) {
-                for span in line.spans {
-                    write!(o, "{}", span.content)?;
-                }
-                writeln!(o)?;
-            }
-            o.flush()?;
+            execute!(o, clr(TXT))?; write!(o, "{}", t)?; o.flush()?;
         }
         AgentEvent::TextDone { .. } => { writeln!(o)?; execute!(o, ResetColor)?; o.flush()?; }
         AgentEvent::ToolCallStart { name, input, .. } => {
