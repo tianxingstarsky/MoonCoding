@@ -5,6 +5,7 @@ use crossterm::{
     terminal::{Clear, ClearType},
 };
 use std::io::{stdout, BufRead, Write};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
@@ -24,12 +25,15 @@ const ERR:   CColor = CColor::Rgb { r: 224, g: 80,  b: 80 };
 fn clr(c: CColor) -> SetForegroundColor { SetForegroundColor(c) }
 
 static MODEL_CACHE: Mutex<Vec<String>> = Mutex::new(Vec::new());
+static LANG: AtomicU8 = AtomicU8::new(0); // 0=en 1=zh
+
+fn t(en: &str, zh: &str) -> String { if LANG.load(Ordering::Relaxed) == 0 { en.to_string() } else { zh.to_string() } }
 
 pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn SessionStore>) -> Result<()> {
     let mut out = stdout();
     execute!(out, clr(ACC))?; write!(out, "vibe-agent")?;
     execute!(out, clr(TXT))?; writeln!(out, " · {}", cfg.provider.model)?;
-    execute!(out, clr(MUTED))?; writeln!(out, "type /help for commands, or ask anything")?;
+    execute!(out, clr(MUTED))?; writeln!(out, "{}", t("type /help for commands, or ask anything", "输入 /help 查看命令, 或直接提问"))?;
     execute!(out, ResetColor)?; out.flush()?;
 
     let (tx, rx) = mpsc::channel::<AgentEvent>();
@@ -49,7 +53,7 @@ pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn Sess
         }
 
         // ── prompt ──
-        let prompt_label = if picking_model { "pick model> " } else { "vibe-agent> " };
+        let prompt_label = if picking_model { t("pick model> ", "选模型> ") } else { "vibe-agent> ".to_string() };
         execute!(out, clr(ACC))?; write!(out, "{}", prompt_label)?;
         execute!(out, ResetColor)?; out.flush()?;
 
@@ -69,21 +73,23 @@ pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn Sess
                     execute!(out, clr(ACC))?; write!(out, "  [{}] ", i+1)?;
                     execute!(out, clr(TXT))?; writeln!(out, "{}", name)?;
                 }
-                execute!(out, clr(MUTED))?; writeln!(out, "  type a number to pick")?;
+                execute!(out, clr(MUTED))?; writeln!(out, "  {}", t("type a number to pick", "输入数字选择"))?;
                 execute!(out, ResetColor)?; out.flush()?;
                 picking_model = true;
                 continue;
             }
             "/help" => {
-                execute!(out, clr(ACC))?; writeln!(out, "  commands:")?;
-                execute!(out, clr(TXT))?;  writeln!(out, "  /model        list available models from API")?;
-                execute!(out, clr(TXT))?;  writeln!(out, "  <number>      pick a model by number (after /model)")?;
-                execute!(out, clr(TXT))?;  writeln!(out, "  /status       show current model & config")?;
-                execute!(out, clr(TXT))?;  writeln!(out, "  /key <sk-..>  set API key")?;
-                execute!(out, clr(TXT))?;  writeln!(out, "  /clear        clear screen")?;
-                execute!(out, clr(TXT))?;  writeln!(out, "  /exit         quit")?;
-                execute!(out, clr(MUTED))?; writeln!(out, "  anything else is sent to the AI agent")?;
-                execute!(out, clr(MUTED))?; writeln!(out, "  ctrl+c = exit  ·  ctrl+d = exit")?;
+                execute!(out, clr(ACC))?; writeln!(out, "  {}", t("commands:", "命令:"))?;
+                execute!(out, clr(TXT))?;  writeln!(out, "  /model        {}", t("list available models from API", "从 API 获取可用模型列表"))?;
+                execute!(out, clr(TXT))?;  writeln!(out, "  <number>      {}", t("pick a model by number (after /model)", "用数字选模型(执行 /model 后)"))?;
+                execute!(out, clr(TXT))?;  writeln!(out, "  /status       {}", t("show current model & config", "查看当前模型和配置"))?;
+                execute!(out, clr(TXT))?;  writeln!(out, "  /key <sk-..>  {}", t("set API key", "设置 API 密钥"))?;
+                execute!(out, clr(TXT))?;  writeln!(out, "  /clear        {}", t("clear screen", "清屏"))?;
+                execute!(out, clr(TXT))?;  writeln!(out, "  /exit         {}", t("quit", "退出"))?;
+                execute!(out, clr(TXT))?;  writeln!(out, "  /zh           {}", t("switch to Chinese", "切换到中文"))?;
+                execute!(out, clr(TXT))?;  writeln!(out, "  /en           {}", t("switch to English", "切换到英文"))?;
+                execute!(out, clr(MUTED))?; writeln!(out, "  {}", t("anything else is sent to the AI agent", "其他内容直接发给 AI"))?;
+                execute!(out, clr(MUTED))?; writeln!(out, "  {}  ·  {}", t("ctrl+c = exit", "ctrl+c = 退出"), t("ctrl+d = exit", "ctrl+d = 退出"))?;
                 execute!(out, ResetColor)?; out.flush()?;
                 continue;
             }
@@ -92,7 +98,7 @@ pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn Sess
                 let idx = s.parse::<usize>().unwrap_or(0);
                 let cache = MODEL_CACHE.lock().unwrap();
                 if idx > 0 && idx <= cache.len() {
-                    execute!(out, clr(OK))?; writeln!(out, "  model => {} (restart to apply)", cache[idx-1])?;
+                    execute!(out, clr(OK))?; writeln!(out, "  {} => {} ({})", t("model", "模型"), cache[idx-1], t("restart to apply", "重启后生效"))?;
                 } else {
                     execute!(out, clr(ERR))?; writeln!(out, "  invalid number, run /model first")?;
                 }
@@ -104,6 +110,8 @@ pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn Sess
                 execute!(out, ResetColor)?; out.flush()?;
                 continue;
             }
+            "/zh" => { LANG.store(1, Ordering::Relaxed); execute!(out, clr(OK))?; writeln!(out, "  已切换为中文")?; execute!(out, ResetColor)?; out.flush()?; continue; }
+            "/en" => { LANG.store(0, Ordering::Relaxed); execute!(out, clr(OK))?; writeln!(out, "  switched to English")?; execute!(out, ResetColor)?; out.flush()?; continue; }
             "/status" => {
                 execute!(out, clr(TXT))?; writeln!(out, "  model: {}", cfg.provider.model)?;
                 execute!(out, ResetColor)?; out.flush()?;
