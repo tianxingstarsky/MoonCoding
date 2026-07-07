@@ -40,11 +40,40 @@ pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn Sess
     let stdin = std::io::stdin();
     let mut lines = stdin.lock().lines();
     let mut agent_thread: Option<std::thread::JoinHandle<()>> = None;
-    let mut picking_model = false;  // set by /model, cleared after selection
+    let mut picking_model = false;
+    let mut text_buf = String::new();  // accumulate streaming text
 
     loop {
         // ── drain any pending events ──
-        while let Ok(ev) = rx.try_recv() { show(&ev)?; }
+        while let Ok(ev) = rx.try_recv() {
+            match &ev {
+                AgentEvent::TextDelta(t) => { text_buf.push_str(t); }
+                AgentEvent::TextDone { .. } => {
+                    let md_lines = markdown::render_markdown(&text_buf);
+                    for line in &md_lines {
+                        for span in &line.spans {
+                            let style = &span.style;
+                            let c = style.fg.unwrap_or(ratatui::style::Color::Rgb(224,224,224));
+                            let (r,g,b) = match c {
+                                ratatui::style::Color::Rgb(r,g,b) => (r,g,b),
+                                ratatui::style::Color::White => (224,224,224),
+                                ratatui::style::Color::Yellow => (224,180,100),
+                                ratatui::style::Color::Cyan => (92,156,245),
+                                ratatui::style::Color::Green => (126,207,126),
+                                ratatui::style::Color::Red => (224,80,80),
+                                _ => (224,224,224),
+                            };
+                            execute!(out, SetForegroundColor(CColor::Rgb { r, g, b }))?;
+                            write!(out, "{}", span.content)?;
+                        }
+                        writeln!(out)?;
+                    }
+                    execute!(out, ResetColor)?; out.flush()?;
+                    text_buf.clear();
+                }
+                _ => { show(&ev)?; }
+            }
+        }
 
         // ── join finished agent ──
         if let Some(h) = agent_thread.take() {
@@ -143,10 +172,6 @@ pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn Sess
 fn show(ev: &AgentEvent) -> Result<()> {
     let mut o = stdout();
     match ev {
-        AgentEvent::TextDelta(t) => {
-            execute!(o, clr(TXT))?; write!(o, "{}", t)?; o.flush()?;
-        }
-        AgentEvent::TextDone { .. } => { writeln!(o)?; execute!(o, ResetColor)?; o.flush()?; }
         AgentEvent::ToolCallStart { name, input, .. } => {
             let p: String = input.chars().take(80).collect();
             execute!(o, clr(ACC))?; write!(o, "  {} ", name)?;
