@@ -35,6 +35,7 @@ pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn Sess
     let stdin = std::io::stdin();
     let mut lines = stdin.lock().lines();
     let mut agent_thread: Option<std::thread::JoinHandle<()>> = None;
+    let mut picking_model = false;  // set by /model, cleared after selection
 
     loop {
         // ── drain any pending events ──
@@ -47,7 +48,8 @@ pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn Sess
         }
 
         // ── prompt ──
-        execute!(out, clr(ACC))?; write!(out, "vibe-agent> ")?;
+        let prompt_label = if picking_model { "pick model> " } else { "vibe-agent> " };
+        execute!(out, clr(ACC))?; write!(out, "{}", prompt_label)?;
         execute!(out, ResetColor)?; out.flush()?;
 
         let line = match lines.next() {
@@ -68,6 +70,7 @@ pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn Sess
                 }
                 execute!(out, clr(MUTED))?; writeln!(out, "  type a number to pick")?;
                 execute!(out, ResetColor)?; out.flush()?;
+                picking_model = true;
                 continue;
             }
             "/help" => {
@@ -75,7 +78,8 @@ pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn Sess
                 execute!(out, ResetColor)?; out.flush()?;
                 continue;
             }
-            s if s.len() <= 2 && s.chars().all(|c| c.is_ascii_digit()) => {
+            s if picking_model && s.len() <= 2 && s.chars().all(|c| c.is_ascii_digit()) => {
+                picking_model = false;
                 let idx = s.parse::<usize>().unwrap_or(0);
                 let cache = MODEL_CACHE.lock().unwrap();
                 if idx > 0 && idx <= cache.len() {
@@ -101,6 +105,7 @@ pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn Sess
                 continue;
             }
             prompt => {
+                picking_model = false; // exit selection mode on any non-number input
                 let tx2 = tx.clone(); let t2 = tools.clone(); let s2 = store.clone();
                 let c2 = cfg.clone(); let sid = uuid::Uuid::new_v4().to_string();
                 let p = prompt.to_string();
