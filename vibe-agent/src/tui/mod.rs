@@ -43,19 +43,18 @@ pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn Sess
     let mut lines = stdin.lock().lines();
     let mut agent_thread: Option<std::thread::JoinHandle<()>> = None;
     let mut picking_model = false;
-    let mut text_buf = String::new();
-    let mut thinking = false;
-    let mut spin_idx: usize = 0;
-    let mut spin_tick = Instant::now();
+    let mut _thinking = false;
+    let mut _spin_idx: usize = 0;
+    let mut _spin_tick = Instant::now();
 
     loop {
         // ── drain any pending events ──
-        drain_events(&rx, &mut text_buf, &mut thinking, &mut spin_idx, &mut spin_tick, &mut out)?;
+        drain_events(&rx, &mut _thinking, &mut _spin_idx, &mut _spin_tick, &mut out)?;
 
         // ── join finished agent ──
         if let Some(h) = agent_thread.take() {
             let _ = h.join();
-            drain_events(&rx, &mut text_buf, &mut thinking, &mut spin_idx, &mut spin_tick, &mut out)?;
+            drain_events(&rx, &mut _thinking, &mut _spin_idx, &mut _spin_tick, &mut out)?;
         }
 
         // ── prompt ──
@@ -146,48 +145,13 @@ pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn Sess
     Ok(())
 }
 
-fn drain_events(rx: &mpsc::Receiver<AgentEvent>, text_buf: &mut String, thinking: &mut bool,
-    spin_idx: &mut usize, spin_tick: &mut Instant, out: &mut impl Write) -> Result<()>
+fn drain_events(rx: &mpsc::Receiver<AgentEvent>, _thinking: &mut bool,
+    _spin_idx: &mut usize, _spin_tick: &mut Instant, out: &mut impl Write) -> Result<()>
 {
     while let Ok(ev) = rx.try_recv() {
         match &ev {
-            AgentEvent::TextDelta(t) => {
-                if !*thinking { *thinking = true; }
-                text_buf.push_str(t);
-                // spinner animation inline with current column
-                if spin_tick.elapsed().as_millis() >= 80 {
-                    *spin_idx = (*spin_idx + 1) % SPINNER.len();
-                    *spin_tick = Instant::now();
-                }
-                execute!(out, MoveToColumn(0), clr(MUTED))?;
-                write!(out, "  {} ", SPINNER[*spin_idx])?;
-                execute!(out, ResetColor)?; out.flush()?;
-            }
-            AgentEvent::TextDone { .. } => {
-                // clear spinner line, print markdown
-                execute!(out, MoveToColumn(0), Clear(ClearType::CurrentLine))?;
-                let md_lines = markdown::render_markdown(text_buf);
-                for line in &md_lines {
-                    for span in &line.spans {
-                        let c = span.style.fg.unwrap_or(ratatui::style::Color::Rgb(224,224,224));
-                        let (r,g,b) = match c {
-                            ratatui::style::Color::Rgb(r,g,b) => (r,g,b),
-                            ratatui::style::Color::White => (224,224,224),
-                            ratatui::style::Color::Yellow => (224,180,100),
-                            ratatui::style::Color::Cyan => (92,156,245),
-                            ratatui::style::Color::Green => (126,207,126),
-                            ratatui::style::Color::Red => (224,80,80),
-                            _ => (224,224,224),
-                        };
-                        execute!(out, SetForegroundColor(CColor::Rgb { r, g, b }))?;
-                        write!(out, "{}", span.content)?;
-                    }
-                    writeln!(out)?;
-                }
-                execute!(out, ResetColor)?; out.flush()?;
-                text_buf.clear();
-                *thinking = false;
-            }
+            AgentEvent::TextDelta(t) => { execute!(out, clr(TXT))?; write!(out, "{}", t)?; out.flush()?; }
+            AgentEvent::TextDone { .. } => { writeln!(out)?; execute!(out, ResetColor)?; out.flush()?; }
             _ => { show(&ev)?; }
         }
     }
