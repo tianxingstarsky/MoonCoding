@@ -45,40 +45,12 @@ pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn Sess
 
     loop {
         // ── drain any pending events ──
-        while let Ok(ev) = rx.try_recv() {
-            match &ev {
-                AgentEvent::TextDelta(t) => { text_buf.push_str(t); }
-                AgentEvent::TextDone { .. } => {
-                    let md_lines = markdown::render_markdown(&text_buf);
-                    for line in &md_lines {
-                        for span in &line.spans {
-                            let style = &span.style;
-                            let c = style.fg.unwrap_or(ratatui::style::Color::Rgb(224,224,224));
-                            let (r,g,b) = match c {
-                                ratatui::style::Color::Rgb(r,g,b) => (r,g,b),
-                                ratatui::style::Color::White => (224,224,224),
-                                ratatui::style::Color::Yellow => (224,180,100),
-                                ratatui::style::Color::Cyan => (92,156,245),
-                                ratatui::style::Color::Green => (126,207,126),
-                                ratatui::style::Color::Red => (224,80,80),
-                                _ => (224,224,224),
-                            };
-                            execute!(out, SetForegroundColor(CColor::Rgb { r, g, b }))?;
-                            write!(out, "{}", span.content)?;
-                        }
-                        writeln!(out)?;
-                    }
-                    execute!(out, ResetColor)?; out.flush()?;
-                    text_buf.clear();
-                }
-                _ => { show(&ev)?; }
-            }
-        }
+        drain_events(&rx, &mut text_buf, &mut out)?;
 
         // ── join finished agent ──
         if let Some(h) = agent_thread.take() {
             let _ = h.join();
-            while let Ok(ev) = rx.try_recv() { show(&ev)?; }
+            drain_events(&rx, &mut text_buf, &mut out)?;
         }
 
         // ── prompt ──
@@ -166,6 +138,38 @@ pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn Sess
         }
     }
 
+    Ok(())
+}
+
+fn drain_events(rx: &mpsc::Receiver<AgentEvent>, text_buf: &mut String, out: &mut impl Write) -> Result<()> {
+    while let Ok(ev) = rx.try_recv() {
+        match &ev {
+            AgentEvent::TextDelta(t) => { text_buf.push_str(t); }
+            AgentEvent::TextDone { .. } => {
+                let md_lines = markdown::render_markdown(text_buf);
+                for line in &md_lines {
+                    for span in &line.spans {
+                        let c = span.style.fg.unwrap_or(ratatui::style::Color::Rgb(224,224,224));
+                        let (r,g,b) = match c {
+                            ratatui::style::Color::Rgb(r,g,b) => (r,g,b),
+                            ratatui::style::Color::White => (224,224,224),
+                            ratatui::style::Color::Yellow => (224,180,100),
+                            ratatui::style::Color::Cyan => (92,156,245),
+                            ratatui::style::Color::Green => (126,207,126),
+                            ratatui::style::Color::Red => (224,80,80),
+                            _ => (224,224,224),
+                        };
+                        execute!(out, SetForegroundColor(CColor::Rgb { r, g, b }))?;
+                        write!(out, "{}", span.content)?;
+                    }
+                    writeln!(out)?;
+                }
+                execute!(out, ResetColor)?; out.flush()?;
+                text_buf.clear();
+            }
+            _ => { show(&ev)?; }
+        }
+    }
     Ok(())
 }
 
