@@ -146,6 +146,7 @@ fn drain_events(rx: &mpsc::Receiver<AgentEvent>, text_buf: &mut String, out: &mu
         match &ev {
             AgentEvent::TextDelta(t) => { text_buf.push_str(t); }
             AgentEvent::TextDone { .. } => {
+                // print full markdown-rendered response
                 let md_lines = markdown::render_markdown(text_buf);
                 for line in &md_lines {
                     for span in &line.spans {
