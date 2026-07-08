@@ -1,5 +1,6 @@
 use anyhow::Result;
 use crossterm::{
+    cursor::MoveToColumn,
     execute,
     style::{Color as CColor, Print, ResetColor, SetForegroundColor},
     terminal::{Clear, ClearType},
@@ -7,7 +8,7 @@ use crossterm::{
 use std::io::{stdout, BufRead, Write};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::config::Config;
 use crate::session::SessionStore;
@@ -25,7 +26,8 @@ const ERR:   CColor = CColor::Rgb { r: 224, g: 80,  b: 80 };
 fn clr(c: CColor) -> SetForegroundColor { SetForegroundColor(c) }
 
 static MODEL_CACHE: Mutex<Vec<String>> = Mutex::new(Vec::new());
-static LANG: AtomicU8 = AtomicU8::new(0); // 0=en 1=zh
+static LANG: AtomicU8 = AtomicU8::new(0);
+static SPINNER: &[&str] = &["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"]; // 0=en 1=zh
 
 fn t(en: &str, zh: &str) -> String { if LANG.load(Ordering::Relaxed) == 0 { en.to_string() } else { zh.to_string() } }
 
@@ -41,16 +43,19 @@ pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn Sess
     let mut lines = stdin.lock().lines();
     let mut agent_thread: Option<std::thread::JoinHandle<()>> = None;
     let mut picking_model = false;
-    let mut text_buf = String::new();  // accumulate streaming text
+    let mut text_buf = String::new();
+    let mut thinking = false;
+    let mut spin_idx: usize = 0;
+    let mut spin_tick = Instant::now();
 
     loop {
         // ── drain any pending events ──
-        drain_events(&rx, &mut text_buf, &mut out)?;
+        drain_events(&rx, &mut text_buf, &mut thinking, &mut spin_idx, &mut spin_tick, &mut out)?;
 
         // ── join finished agent ──
         if let Some(h) = agent_thread.take() {
             let _ = h.join();
-            drain_events(&rx, &mut text_buf, &mut out)?;
+            drain_events(&rx, &mut text_buf, &mut thinking, &mut spin_idx, &mut spin_tick, &mut out)?;
         }
 
         // ── prompt ──
@@ -141,12 +146,26 @@ pub async fn run(cfg: Arc<Config>, tools: Arc<ToolRegistry>, store: Arc<dyn Sess
     Ok(())
 }
 
-fn drain_events(rx: &mpsc::Receiver<AgentEvent>, text_buf: &mut String, out: &mut impl Write) -> Result<()> {
+fn drain_events(rx: &mpsc::Receiver<AgentEvent>, text_buf: &mut String, thinking: &mut bool,
+    spin_idx: &mut usize, spin_tick: &mut Instant, out: &mut impl Write) -> Result<()>
+{
     while let Ok(ev) = rx.try_recv() {
         match &ev {
-            AgentEvent::TextDelta(t) => { text_buf.push_str(t); }
+            AgentEvent::TextDelta(t) => {
+                if !*thinking { *thinking = true; }
+                text_buf.push_str(t);
+                // spinner animation inline with current column
+                if spin_tick.elapsed().as_millis() >= 80 {
+                    *spin_idx = (*spin_idx + 1) % SPINNER.len();
+                    *spin_tick = Instant::now();
+                }
+                execute!(out, MoveToColumn(0), clr(MUTED))?;
+                write!(out, "  {} ", SPINNER[*spin_idx])?;
+                execute!(out, ResetColor)?; out.flush()?;
+            }
             AgentEvent::TextDone { .. } => {
-                // print full markdown-rendered response
+                // clear spinner line, print markdown
+                execute!(out, MoveToColumn(0), Clear(ClearType::CurrentLine))?;
                 let md_lines = markdown::render_markdown(text_buf);
                 for line in &md_lines {
                     for span in &line.spans {
@@ -167,6 +186,7 @@ fn drain_events(rx: &mpsc::Receiver<AgentEvent>, text_buf: &mut String, out: &mu
                 }
                 execute!(out, ResetColor)?; out.flush()?;
                 text_buf.clear();
+                *thinking = false;
             }
             _ => { show(&ev)?; }
         }
