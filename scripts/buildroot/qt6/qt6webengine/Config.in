@@ -1,0 +1,31 @@
+config BR2_PACKAGE_QT6WEBENGINE
+	bool "qt6webengine"
+	depends on BR2_PACKAGE_QT6_ARCH_SUPPORTS
+	depends on BR2_TOOLCHAIN_GCC_AT_LEAST_8
+	depends on BR2_HOST_GCC_AT_LEAST_8
+	depends on BR2_PACKAGE_HOST_NODEJS
+	select BR2_PACKAGE_QT6WEBCHANNEL
+	select BR2_PACKAGE_QT6BASE_GUI
+	select BR2_PACKAGE_QT6BASE_WIDGETS
+	select BR2_PACKAGE_QT6BASE_NETWORK
+	select BR2_PACKAGE_LIBNSS
+	select BR2_PACKAGE_LIBXML2
+	select BR2_PACKAGE_LIBXSLT
+	select BR2_PACKAGE_JPEG
+	select BR2_PACKAGE_LIBPNG
+	select BR2_PACKAGE_FREETYPE
+	select BR2_PACKAGE_FONTCONFIG
+	select BR2_PACKAGE_ZLIB
+	help
+	  Qt WebEngine provides a web browser engine based on Chromium
+	  for embedding HTML/CSS/JS content (QWebEngineView).
+
+	  Very large build (Chromium). Needs host nodejs/ninja/python.
+	  Intended for MoonCoding board HTML preview; may be heavy on
+	  512MB-class devices — keep as optional.
+
+	  https://doc.qt.io/qt-6/qtwebengine-index.html
+
+comment "qt6webengine needs host nodejs"
+	depends on !BR2_PACKAGE_HOST_NODEJS
+	depends on BR2_PACKAGE_QT6

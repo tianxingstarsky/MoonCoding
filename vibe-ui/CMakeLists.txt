@@ -76,8 +76,13 @@ target_link_libraries(mooncoding PRIVATE Qt6::Widgets)
 option(MOONCODING_REQUIRE_WEBENGINE
     "Fail configure if Qt6 WebEngineWidgets is missing (board verification)"
     OFF)
+option(MOONCODING_DISABLE_WEBENGINE
+    "Force QTextBrowser preview even if WebEngineWidgets is available"
+    OFF)
 find_package(Qt6 QUIET COMPONENTS WebEngineWidgets)
-if(Qt6WebEngineWidgets_FOUND)
+if(MOONCODING_DISABLE_WEBENGINE)
+    message(STATUS "MoonCoding: WebEngine disabled by MOONCODING_DISABLE_WEBENGINE — QTextBrowser")
+elseif(Qt6WebEngineWidgets_FOUND)
     target_compile_definitions(mooncoding PRIVATE HAS_QT_WEBENGINE=1)
     target_link_libraries(mooncoding PRIVATE Qt6::WebEngineWidgets)
     message(STATUS "MoonCoding: Qt6 WebEngineWidgets enabled")

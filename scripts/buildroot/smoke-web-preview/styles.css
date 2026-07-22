@@ -1,0 +1,24 @@
+body {
+  margin: 0;
+  font-family: sans-serif;
+  background: linear-gradient(160deg, #e8f1ff 0%, #f6f4f1 55%, #ffe8d6 100%);
+  color: #1a1a1a;
+}
+main {
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 28px 18px;
+}
+h1 { font-size: 32px; margin: 0 0 12px; }
+.hint { font-size: 16px; line-height: 1.5; color: #444; }
+button {
+  margin-top: 16px;
+  font-size: 20px;
+  padding: 14px 22px;
+  border: 0;
+  border-radius: 10px;
+  background: #1f6feb;
+  color: #fff;
+}
+#count { font-weight: 700; color: #0b3d91; }
+a { color: #0b3d91; font-size: 16px; }
