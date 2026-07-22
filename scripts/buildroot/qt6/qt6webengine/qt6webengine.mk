@@ -22,7 +22,9 @@ QT6WEBENGINE_LICENSE_FILES = \
 	LICENSES/LGPL-3.0-only.txt \
 	LICENSES/Qt-GPL-exception-1.0.txt
 
-# Keep the build smaller: skip PDF module, examples, tests.
+# Cross-compile requires a *host* gn on PATH (see install-host-gn.sh).
+# QT_FEATURE_webengine_build_gn alone is not enough: Qt fatals when
+# CMAKE_CROSSCOMPILING && !Gn_FOUND before it can build bundled gn.
 QT6WEBENGINE_CONF_OPTS = \
 	-DQT_HOST_PATH=$(HOST_DIR) \
 	-DBUILD_WITH_PCH=OFF \
@@ -30,7 +32,6 @@ QT6WEBENGINE_CONF_OPTS = \
 	-DQT_BUILD_TESTS=OFF \
 	-DQT_FEATURE_qtpdf_build=OFF \
 	-DQT_FEATURE_webengine_system_ninja=ON \
-	-DQT_FEATURE_webengine_build_gn=ON \
 	-DQT_FEATURE_webengine_proprietary_codecs=OFF \
 	-DQT_FEATURE_webengine_webrtc=OFF \
 	-DQT_FEATURE_webengine_kerberos=OFF \
