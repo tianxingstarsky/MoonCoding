@@ -30,8 +30,11 @@ fi
 if [ -d /root/mooncoding/resources ]; then
   export QTWEBENGINE_RESOURCES_PATH=/root/mooncoding/resources
 fi
-if [ -d /root/mooncoding/translations/qtwebengine_locales ]; then
+if [ -f /root/mooncoding/translations/qtwebengine_locales/en-US.pak ]; then
   export QTWEBENGINE_LOCALES_PATH=/root/mooncoding/translations/qtwebengine_locales
+elif [ -f /root/mooncoding/resources/en-US.pak ]; then
+  # Fallback when locale paks were staged into resources/ by older deploys.
+  export QTWEBENGINE_LOCALES_PATH=/root/mooncoding/resources
 fi
 
 # Board rootfs often ships without CA store; python HTTPS (model list) needs this.

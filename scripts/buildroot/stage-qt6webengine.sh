@@ -86,9 +86,27 @@ do
   fi
 done
 
+# Some Qt/Buildroot layouts drop Chromium locale .pak next to resources.
+# WebEngine looks under QTWEBENGINE_LOCALES_PATH (en-US.pak etc.), not resources/.
+if [[ ! -f "${STAGE}/translations/qtwebengine_locales/en-US.pak" ]] \
+   && [[ -d "${STAGE}/resources" ]]; then
+  for f in "${STAGE}/resources"/*.pak; do
+    [[ -f "$f" ]] || continue
+    b=$(basename "$f")
+    case "$b" in
+      qtwebengine_*) continue ;;
+    esac
+    cp -a "$f" "${STAGE}/translations/qtwebengine_locales/$b"
+  done
+  if [[ -f "${STAGE}/translations/qtwebengine_locales/en-US.pak" ]]; then
+    echo "staged locales from resources/*.pak"
+    copied=$((copied + 1))
+  fi
+fi
+
 if (( copied == 0 )); then
-  echo "WEBENGINE_STAGE_SKIP: no Qt WebEngine artifacts in sysroot/target yet"
-  exit 0
+    echo "WEBENGINE_STAGE_SKIP: no Qt WebEngine artifacts in sysroot/target yet"
+    exit 0
 fi
 
 echo "WEBENGINE_STAGE_OK (${copied} copy ops)"
