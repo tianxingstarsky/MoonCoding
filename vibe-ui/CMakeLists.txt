@@ -60,6 +60,9 @@ set(MOONCODING_GOOGLEPINYIN_SOURCES
     third_party/googlepinyin/src/utf16reader.cpp
 )
 
+# Buildroot Qt6 Core may be built without zstd while host rcc defaults to zstd.
+set(CMAKE_AUTORCC_OPTIONS "--no-zstd")
+
 qt_add_executable(mooncoding WIN32 MACOSX_BUNDLE
     ${MOONCODING_UI_SOURCES}
     ${MOONCODING_GOOGLEPINYIN_SOURCES}
