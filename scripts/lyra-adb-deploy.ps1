@@ -13,6 +13,7 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 
 if (-not $Adb) {
     $candidates = @(
+        "E:\下载\adb_fastboot\adb.exe",
         "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe",
         "E:\workspace\luckyfoxRK3506B\platform-tools\adb.exe",
         "adb"
@@ -21,6 +22,9 @@ if (-not $Adb) {
         if ($c -eq "adb") { $Adb = $c; break }
         if (Test-Path $c) { $Adb = $c; break }
     }
+}
+if (-not $Adb) {
+    throw "adb not found. Expected E:\下载\adb_fastboot\adb.exe (see .cursor/skills/lyra-adb/SKILL.md)"
 }
 if (-not $BuildDir) { $BuildDir = Join-Path $RepoRoot "build-board" }
 if (-not $StageDir) { $StageDir = Join-Path $BuildDir "qt6-stage" }
