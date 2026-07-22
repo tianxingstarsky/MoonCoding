@@ -8,6 +8,8 @@ OUT="${HOME}/Lyra-sdk/buildroot/output/rockchip_rk3506_luckfox"
 SYS="${OUT}/host/arm-buildroot-linux-gnueabihf/sysroot"
 # Resolved form of host/bin/../arm-buildroot-linux-gnueabihf/sysroot
 NESTED="${SYS}/home/mooncoding/Lyra-sdk/buildroot/output/rockchip_rk3506_luckfox/host/arm-buildroot-linux-gnueabihf/sysroot"
+# Chromium -I uses host/bin/../arm-... ; create bin so ".." resolves.
+mkdir -p "${SYS}/home/mooncoding/Lyra-sdk/buildroot/output/rockchip_rk3506_luckfox/host/bin"
 mkdir -p "$(dirname "${NESTED}")"
 if [[ -L "${NESTED}" || -e "${NESTED}" ]]; then
   rm -rf "${NESTED}"
