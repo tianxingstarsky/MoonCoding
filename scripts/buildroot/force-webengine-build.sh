@@ -12,6 +12,7 @@ python3 -c 'import html5lib; print("html5lib OK", html5lib.__version__)'
 "${OUT}/host/bin/python3" -c 'import html5lib; print("host html5lib OK", html5lib.__version__)'
 bash /mnt/e/newvibecode/scripts/buildroot/seed-khronos-headers.sh
 bash /mnt/e/newvibecode/scripts/buildroot/install-host-gn.sh
+bash /mnt/e/newvibecode/scripts/buildroot/fix-sysroot-path-doubling.sh
 test -x "${OUT}/host/bin/gn"
 test -x "${OUT}/host/bin/qsb"
 test -e "${OUT}/target/usr/lib/libQt6Quick.so.6"

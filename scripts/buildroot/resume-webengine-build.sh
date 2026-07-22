@@ -10,6 +10,7 @@ JOBS="$(nproc)"
 
 bash /mnt/e/newvibecode/scripts/buildroot/seed-khronos-headers.sh
 bash /mnt/e/newvibecode/scripts/buildroot/install-host-gn.sh
+bash /mnt/e/newvibecode/scripts/buildroot/fix-sysroot-path-doubling.sh
 test -x "${OUT}/host/bin/gn"
 
 force_installed() {
