@@ -57,6 +57,11 @@ QT6WEBENGINE_DEPENDENCIES = \
 	qt6webchannel \
 	zlib
 
+# html5lib is required by QtWebEngine's configure checks (host Python).
+ifeq ($(BR2_PACKAGE_HOST_PYTHON_HTML5LIB),y)
+QT6WEBENGINE_DEPENDENCIES += host-python-html5lib
+endif
+
 # dbus is optional but helps Chromium sandboxes / notifications
 ifeq ($(BR2_PACKAGE_DBUS),y)
 QT6WEBENGINE_DEPENDENCIES += dbus
