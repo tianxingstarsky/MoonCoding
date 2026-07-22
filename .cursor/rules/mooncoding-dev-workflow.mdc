@@ -1,0 +1,41 @@
+---
+description: MoonCoding 开发流程——与产品内 Agent 同一套验证与防踩坑标准
+alwaysApply: true
+---
+
+# MoonCoding 开发流程（Cursor Agent 必守）
+
+与产品内 LLM Agent 同一标准：**人看不见/点不到的东西，必须用 CLI/无 UI 证据证明**；踩坑由系统消掉，不甩给操作者。
+
+## 产品自包含（部署形态）
+
+本项目面向**产品部署**：功能在仓库内实现并可灵活部署；禁止依赖固定第三方特性（如写死网卡、要求板端再下第三方包）。运行时与资源尽量随部署包自包含带走。详见 `.cursor/skills/mooncoding-self-contained/SKILL.md`。
+
+## 做功能时顺手验证（不是事后补课）
+
+1. **先可独立跑，再接线 UI**：Rust 逻辑在 `vibe-agent` library / 单测里验；Qt 只做交互壳。
+2. **微应用 / 交互控件**：看不见真实页面时，必须同时交付 CLI 测法——`HeadlessApp` + `click` / `drive_events` / `assert_patch`，或等价的无主机脚本；每个按钮/开关至少覆盖一次预期 `ui_patch`。
+3. **改完即验**：相关 `cargo test` / `verify_command` 白名单命令 / `vibe verify`；不要只改提示词或口头说「用户待会测」。
+4. **完成证据要真**：树节点 `completed`、功能宣称「已好」前，必须有本轮 exit=0 的命令证据；禁止编造。
+
+## 防踩坑（产品侧解决，不教用户绕）
+
+- Allowlist、PATH、证据命令匹配、kind 纠偏等：**改代码消掉**，不要写长说明让操作者背。
+- LLM 会踩的坑（参数形状、证据 JSON vs 人话命令、`App()` 在 import 时挂起等）→ 改 tool/SDK/prompt/默认行为。
+- **区块是真相源**：程序硬拒绝 plain `read`/直写 `.py/.rs/…`；改块后由程序 assemble 投影。禁止靠提示词「请不要读原文件」代替门禁。
+- **区块操作是程序交互**：AI 只填 `vibe` 工具字段；每次结果附带 NEXT 引导。禁止把 vibe 当成可乱敲的命令行。
+- **横屏优先**：Apps 宿主是宽屏；UI 用 `row`/`grid` 吃横向空间，禁止手机式超长竖排。
+- 新能力走扩展槽（Provider / Tool / Event / Session / Tree / Prompt），**禁止改 `agent.rs` 主循环**。
+
+## 读与改的可观测性（做 UI/工具时）
+
+- 读文件/区块：展示**内容**；代码读要带**文件名 + 行号范围**。
+- vibe 锁定修改：展示**区块锁定行范围**（`locked lines A-B` / `lines.start-end`）。
+- 工具结果对「读/改」类默认应让人看见，而不是只留一行摘要。
+
+## 编码底线（与 AGENTS.md 一致）
+
+- 协议安全 > 便利（rev、purpose、字节一致）。
+- 禁止 unwrap；工具输出截断；LLM 只走 SSE。
+- 模块写完立刻 `cargo build` / 相关测试，不攒到最后。
+- 只改任务需要的代码；用户没要求不提交、不扩 scope。
