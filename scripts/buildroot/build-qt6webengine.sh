@@ -14,6 +14,8 @@ JOBS="${BR2_JLEVEL:-$(nproc)}"
 # imported into WSL). Keep a minimal Unix PATH for the make invocation.
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${HOME}/.cargo/bin:${BR}/output/rockchip_rk3506_luckfox/host/bin"
 
+bash "${ROOT}/scripts/buildroot/patch-host-qt6base-gui.sh"
+
 bash "${ROOT}/scripts/buildroot/install-qt6webengine.sh"
 
 # Prefer dl mirror cache: if operator already downloaded tarball to /mnt/e/下载
