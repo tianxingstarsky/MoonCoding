@@ -22,6 +22,11 @@ QT6WEBENGINE_LICENSE_FILES = \
 	LICENSES/LGPL-3.0-only.txt \
 	LICENSES/Qt-GPL-exception-1.0.txt
 
+# Chromium/GN objects use 32-bit time_t; Buildroot TARGET_*FLAGS inject
+# -D_TIME_BITS=64 which breaks QtWebEngineProcess sandbox localtime overrides.
+QT6WEBENGINE_CFLAGS = $(filter-out -D_TIME_BITS=64,$(TARGET_CFLAGS))
+QT6WEBENGINE_CXXFLAGS = $(filter-out -D_TIME_BITS=64,$(TARGET_CXXFLAGS))
+
 # Cross-compile requires a *host* gn on PATH (see install-host-gn.sh).
 # QT_FEATURE_webengine_build_gn alone is not enough: Qt fatals when
 # CMAKE_CROSSCOMPILING && !Gn_FOUND before it can build bundled gn.

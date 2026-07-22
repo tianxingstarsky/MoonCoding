@@ -12,6 +12,7 @@ JOBS="${MOONCODING_WE_JOBS:-8}"
 bash /mnt/e/newvibecode/scripts/buildroot/fix-sysroot-path-doubling.sh
 bash /mnt/e/newvibecode/scripts/buildroot/ensure-host-nss.sh
 bash /mnt/e/newvibecode/scripts/buildroot/patch-webengine-time-abi.sh
+bash /mnt/e/newvibecode/scripts/buildroot/fix-webengine-process-time-abi.sh
 test -x "${OUT}/host/bin/gn"
 test -d "${OUT}/build/qt6webengine-6.4.3/buildroot-build"
 
