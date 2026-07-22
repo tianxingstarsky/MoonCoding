@@ -23,6 +23,19 @@ QT6SHADERTOOLS_CONF_OPTS = \
 	-DQT_BUILD_EXAMPLES=OFF \
 	-DQT_BUILD_TESTS=OFF
 
-QT6SHADERTOOLS_DEPENDENCIES = host-pkgconf qt6base
+HOST_QT6SHADERTOOLS_CONF_OPTS = \
+	-DBUILD_WITH_PCH=OFF \
+	-DQT_BUILD_EXAMPLES=OFF \
+	-DQT_BUILD_TESTS=OFF
+
+QT6SHADERTOOLS_DEPENDENCIES = \
+	host-pkgconf \
+	host-qt6shadertools \
+	qt6base
+
+HOST_QT6SHADERTOOLS_DEPENDENCIES = \
+	host-pkgconf \
+	host-qt6base
 
 $(eval $(cmake-package))
+$(eval $(host-cmake-package))

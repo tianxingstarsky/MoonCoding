@@ -31,9 +31,21 @@ QT6DECLARATIVE_CONF_OPTS = \
 	-DQT_BUILD_EXAMPLES=OFF \
 	-DQT_BUILD_TESTS=OFF
 
+HOST_QT6DECLARATIVE_CONF_OPTS = \
+	-DBUILD_WITH_PCH=OFF \
+	-DQT_BUILD_EXAMPLES=OFF \
+	-DQT_BUILD_TESTS=OFF
+
 QT6DECLARATIVE_DEPENDENCIES = \
 	host-pkgconf \
+	host-qt6declarative \
 	qt6base \
 	qt6shadertools
 
+HOST_QT6DECLARATIVE_DEPENDENCIES = \
+	host-pkgconf \
+	host-qt6base \
+	host-qt6shadertools
+
 $(eval $(cmake-package))
+$(eval $(host-cmake-package))
