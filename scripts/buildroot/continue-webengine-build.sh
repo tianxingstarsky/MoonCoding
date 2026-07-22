@@ -9,6 +9,7 @@ LOG="/mnt/e/newvibecode/build-board/lyra-qt6webengine-build.log"
 JOBS="$(nproc)"
 
 bash /mnt/e/newvibecode/scripts/buildroot/fix-sysroot-path-doubling.sh
+bash /mnt/e/newvibecode/scripts/buildroot/ensure-host-nss.sh
 test -x "${OUT}/host/bin/gn"
 test -d "${OUT}/build/qt6webengine-6.4.3/buildroot-build"
 
