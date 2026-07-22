@@ -6,10 +6,12 @@ OUT="${HOME}/Lyra-sdk/buildroot/output/rockchip_rk3506_luckfox"
 BR="${HOME}/Lyra-sdk/buildroot"
 export PATH="${PATH}:${OUT}/host/bin"
 LOG="/mnt/e/newvibecode/build-board/lyra-qt6webengine-build.log"
-JOBS="$(nproc)"
+# Cap jobs: WSL .wslconfig is 8 CPUs / 16GB; Chromium -j28 OOMs the host.
+JOBS="${MOONCODING_WE_JOBS:-8}"
 
 bash /mnt/e/newvibecode/scripts/buildroot/fix-sysroot-path-doubling.sh
 bash /mnt/e/newvibecode/scripts/buildroot/ensure-host-nss.sh
+bash /mnt/e/newvibecode/scripts/buildroot/patch-webengine-time-abi.sh
 test -x "${OUT}/host/bin/gn"
 test -d "${OUT}/build/qt6webengine-6.4.3/buildroot-build"
 

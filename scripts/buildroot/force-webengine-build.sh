@@ -6,7 +6,7 @@ OUT="${HOME}/Lyra-sdk/buildroot/output/rockchip_rk3506_luckfox"
 BR="${HOME}/Lyra-sdk/buildroot"
 export PATH="${PATH}:${OUT}/host/bin"
 LOG="/mnt/e/newvibecode/build-board/lyra-qt6webengine-build.log"
-JOBS="$(nproc)"
+JOBS="${MOONCODING_WE_JOBS:-8}"
 
 python3 -c 'import html5lib; print("html5lib OK", html5lib.__version__)'
 "${OUT}/host/bin/python3" -c 'import html5lib; print("host html5lib OK", html5lib.__version__)'

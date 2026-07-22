@@ -6,7 +6,7 @@ OUT="${HOME}/Lyra-sdk/buildroot/output/rockchip_rk3506_luckfox"
 BR="${HOME}/Lyra-sdk/buildroot"
 export PATH="${PATH}:${OUT}/host/bin"
 LOG="/mnt/e/newvibecode/build-board/lyra-qt6webengine-build.log"
-JOBS="$(nproc)"
+JOBS="${MOONCODING_WE_JOBS:-8}"
 
 bash /mnt/e/newvibecode/scripts/buildroot/seed-khronos-headers.sh
 bash /mnt/e/newvibecode/scripts/buildroot/install-host-gn.sh

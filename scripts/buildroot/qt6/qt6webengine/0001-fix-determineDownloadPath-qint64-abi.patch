@@ -1,0 +1,33 @@
+--- a/src/core/profile_adapter.h
++++ b/src/core/profile_adapter.h
+@@ -181,7 +181,7 @@ public:
+     QHash<QByteArray, QSharedPointer<UserNotificationController>> &persistentNotifications()
+     {   return m_persistentNotifications; }
+ 
+-    QString determineDownloadPath(const QString &downloadDirectory, const QString &suggestedFilename, const time_t &startTime);
++    QString determineDownloadPath(const QString &downloadDirectory, const QString &suggestedFilename, const qint64 &startTime);
+ 
+     void requestIconForPageURL(const QUrl &pageUrl, int desiredSizeInPixel, bool touchIconsEnabled,
+                                std::function<void (const QIcon &, const QUrl &, const QUrl &)> iconAvailableCallback);
+--- a/src/core/profile_adapter.cpp
++++ b/src/core/profile_adapter.cpp
+@@ -662,7 +662,7 @@ QString ProfileAdapter::httpUserAgent() const
+     }
+ }
+ 
+-QString ProfileAdapter::determineDownloadPath(const QString &downloadDirectory, const QString &suggestedFilename, const time_t &startTime)
++QString ProfileAdapter::determineDownloadPath(const QString &downloadDirectory, const QString &suggestedFilename, const qint64 &startTime)
+ {
+     QFileInfo suggestedFile(QDir(downloadDirectory).absoluteFilePath(suggestedFilename));
+     QString suggestedFilePath = suggestedFile.absoluteFilePath();
+--- a/src/core/download_manager_delegate_qt.cpp
++++ b/src/core/download_manager_delegate_qt.cpp
+@@ -127,7 +127,7 @@ void DownloadManagerDelegateQt::DetermineDownloadTarget(download::DownloadItem *
+ 
+     QDir defaultDownloadDirectory(m_profileAdapter->downloadPath());
+ 
+-    QString suggestedFilePath = m_profileAdapter->determineDownloadPath(defaultDownloadDirectory.absolutePath(), suggestedFilename, item->GetStartTime().ToTimeT());
++    QString suggestedFilePath = m_profileAdapter->determineDownloadPath(defaultDownloadDirectory.absolutePath(), suggestedFilename, static_cast<qint64>(item->GetStartTime().ToTimeT()));
+ 
+     item->AddObserver(this);
+     QList<ProfileAdapterClient*> clients = m_profileAdapter->clients();
