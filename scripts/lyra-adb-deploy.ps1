@@ -77,12 +77,12 @@ Invoke-Adb push $vibeBin ("{0}/vibe" -f $RemoteDir)
 Invoke-Adb shell ("chmod +x {0}/mooncoding {0}/vibe" -f $RemoteDir)
 
 Write-Host "Pushing staged Qt6 libs..."
-Get-ChildItem -Path (Join-Path $StageDir "lib") -File | ForEach-Object {
+Get-ChildItem -Path (Join-Path $StageDir "lib") -File | Where-Object { $_.Length -gt 0 } | ForEach-Object {
     Invoke-Adb push $_.FullName ("{0}/lib/" -f $RemoteDir)
 }
 $platDir = Join-Path $StageDir "plugins\platforms"
 if (Test-Path $platDir) {
-    Get-ChildItem -Path $platDir -File | ForEach-Object {
+    Get-ChildItem -Path $platDir -File | Where-Object { $_.Length -gt 0 } | ForEach-Object {
         Invoke-Adb push $_.FullName ("{0}/plugins/platforms/" -f $RemoteDir)
     }
 }

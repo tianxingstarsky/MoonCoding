@@ -17,7 +17,14 @@ copy_one() {
   local src="$1" dest="$2"
   if [[ -e "$src" ]]; then
     mkdir -p "$(dirname "$dest")"
-    cp -a "$src" "$dest"
+    # Dereference symlinks so Windows adb can push real files (WSL symlinks
+    # appear as 0-byte stubs on the E: mount).
+    cp -aL "$src" "$dest" 2>/dev/null || cp -a "$src" "$dest"
+    # If dest is still empty symlink/stub, replace with resolved content.
+    if [[ ! -s "$dest" ]] && [[ -f "$src" ]]; then
+      rm -f "$dest"
+      cp -L "$src" "$dest" 2>/dev/null || cat "$src" > "$dest"
+    fi
     echo "staged $(basename "$src")"
     copied=$((copied + 1))
   fi
