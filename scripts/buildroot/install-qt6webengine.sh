@@ -86,12 +86,9 @@ enable BR2_PACKAGE_QT6DECLARATIVE
 enable BR2_PACKAGE_QT6WEBCHANNEL
 enable BR2_PACKAGE_QT6WEBENGINE
 
-# Force rebuild of webengine after adding Quick deps (previous build skipped Chromium).
-rm -rf "${OUT}/build/qt6webengine-6.4.3" \
-  "${OUT}/build/qt6shadertools-6.4.3" \
-  "${OUT}/build/qt6declarative-6.4.3" \
-  "${OUT}/build/host-qt6shadertools-6.4.3" \
-  "${OUT}/build/host-qt6declarative-6.4.3"
+# Only wipe qt6webengine build tree by default. Declarative/shadertools are
+# expensive and should be rebuilt explicitly when their recipes change.
+rm -rf "${OUT}/build/qt6webengine-6.4.3"
 
 # If host Gui was just enabled, rebuild host-qt6base (required for qsb).
 if grep -q 'MOONCODING_HOST_QT6BASE_GUI' "${BR}/package/qt6/qt6base/qt6base.mk"; then
