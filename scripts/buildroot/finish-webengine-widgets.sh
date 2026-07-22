@@ -26,13 +26,24 @@ python3 - <<'PY' > /tmp/we-process-link.sh
 import shlex
 from pathlib import Path
 raw = Path('/tmp/we-process-link-raw.txt').read_text().strip()
+# CMake/ninja often emits: : && /path/g++ ... && :
+if raw.startswith(': && '):
+    raw = raw[len(': && '):]
+if raw.endswith(' && :'):
+    raw = raw[: -len(' && :')]
 args = shlex.split(raw)
+if not args:
+    raise SystemExit('empty link command')
 print('#!/bin/bash')
 print('set -euo pipefail')
 print('cd /home/mooncoding/Lyra-sdk/buildroot/output/rockchip_rk3506_luckfox/build/qt6webengine-6.4.3/buildroot-build')
 print('exec ' + ' '.join(shlex.quote(a) for a in args))
 PY
 chmod +x /tmp/we-process-link.sh
+# Debug
+head -5 /tmp/we-process-link.sh
+echo '--- raw ---'
+head -c 200 /tmp/we-process-link-raw.txt; echo
 
 # Confirm main.o still has long (not long long) undefs
 if "${NM}" -u src/process/CMakeFiles/QtWebEngineProcess.dir/main.cpp.o | grep -q 'localtime_overrideEPKx'; then
