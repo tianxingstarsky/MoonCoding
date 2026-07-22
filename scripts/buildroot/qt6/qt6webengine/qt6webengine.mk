@@ -53,6 +53,7 @@ QT6WEBENGINE_DEPENDENCIES = \
 	libxml2 \
 	libxslt \
 	qt6base \
+	qt6declarative \
 	qt6webchannel \
 	zlib
 
@@ -60,5 +61,14 @@ QT6WEBENGINE_DEPENDENCIES = \
 ifeq ($(BR2_PACKAGE_DBUS),y)
 QT6WEBENGINE_DEPENDENCIES += dbus
 endif
+
+# Refuse a silent "success" when Chromium/WebEngine was skipped (e.g. missing Quick).
+define QT6WEBENGINE_CHECK_BUILT
+	@if ! ls $(STAGING_DIR)/usr/lib/libQt6WebEngineCore.so* >/dev/null 2>&1; then \
+		echo "ERROR: qt6webengine finished without libQt6WebEngineCore — check configure log for skipped modules (often missing Qt::Quick / OpenGL)."; \
+		exit 1; \
+	fi
+endef
+QT6WEBENGINE_POST_INSTALL_STAGING_HOOKS += QT6WEBENGINE_CHECK_BUILT
 
 $(eval $(cmake-package))

@@ -1,0 +1,8 @@
+config BR2_PACKAGE_QT6SHADERTOOLS
+	bool "qt6shadertools"
+	select BR2_PACKAGE_QT6BASE_GUI
+	help
+	  Qt Shader Tools provides tools for the cross-platform Qt
+	  shader pipeline. Required by Qt Declarative / Quick.
+
+	  https://doc.qt.io/qt-6/qtshadertools-index.html

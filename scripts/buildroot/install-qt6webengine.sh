@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install MoonCoding qt6webchannel + qt6webengine packages into Luckfox Buildroot
+# Install MoonCoding qt6* packages for WebEngine into Luckfox Buildroot
 # and enable them in the rockchip_rk3506_luckfox .config.
 set -euo pipefail
 
@@ -21,36 +21,45 @@ if [[ ! -d "${PKG}" ]]; then
   exit 1
 fi
 
-mkdir -p "${PKG}/qt6webchannel" "${PKG}/qt6webengine"
-cp -a "${SRC}/qt6webchannel/." "${PKG}/qt6webchannel/"
-cp -a "${SRC}/qt6webengine/." "${PKG}/qt6webengine/"
+for p in qt6shadertools qt6declarative qt6webchannel qt6webengine; do
+  mkdir -p "${PKG}/${p}"
+  cp -a "${SRC}/${p}/." "${PKG}/${p}/"
+  echo "installed ${p}"
+done
 
-# Wire into package/qt6/Config.in if not already sourced.
-if ! grep -q 'qt6webchannel/Config.in' "${PKG}/Config.in"; then
-  python3 - <<'PY'
+python3 - <<'PY'
 from pathlib import Path
 import os
 cfg = Path(os.environ["PKG"]) / "Config.in"
 text = cfg.read_text()
-needle = 'source "package/qt6/qt6svg/Config.in"'
-extra = needle + '\n' + 'source "package/qt6/qt6webchannel/Config.in"\n' + 'source "package/qt6/qt6webengine/Config.in"'
-if 'qt6webchannel/Config.in' not in text:
-    if needle not in text:
-        raise SystemExit("cannot find qt6svg source line in Config.in")
-    text = text.replace(needle, extra, 1)
+needed = [
+    'source "package/qt6/qt6shadertools/Config.in"',
+    'source "package/qt6/qt6declarative/Config.in"',
+    'source "package/qt6/qt6webchannel/Config.in"',
+    'source "package/qt6/qt6webengine/Config.in"',
+]
+changed = False
+for line in needed:
+    if line not in text:
+        # Insert after qt6svg source line (or at end of if-block before endif).
+        needle = 'source "package/qt6/qt6svg/Config.in"'
+        if needle in text:
+            text = text.replace(needle, needle + "\n" + line, 1)
+        else:
+            text = text.replace("\nendif\n", "\n" + line + "\nendif\n", 1)
+        changed = True
+        print("added", line)
+if changed:
     cfg.write_text(text)
-    print("patched package/qt6/Config.in")
 else:
-    print("Config.in already references qt6webchannel")
+    print("Config.in already has all WebEngine-related sources")
 PY
-fi
 
 if [[ ! -f "${CFG}" ]]; then
   echo "ERROR: missing ${CFG} — run Buildroot configure first"
   exit 1
 fi
 
-# Enable required options (idempotent).
 enable() {
   local key="$1"
   if grep -q "^${key}=y$" "${CFG}"; then
@@ -72,15 +81,19 @@ enable BR2_PACKAGE_LIBNSS
 enable BR2_PACKAGE_LIBXML2
 enable BR2_PACKAGE_LIBXSLT
 enable BR2_PACKAGE_JPEG
+enable BR2_PACKAGE_QT6SHADERTOOLS
+enable BR2_PACKAGE_QT6DECLARATIVE
 enable BR2_PACKAGE_QT6WEBCHANNEL
 enable BR2_PACKAGE_QT6WEBENGINE
 
-# Olddefconfig to resolve new selects / deps.
+# Force rebuild of webengine after adding Quick deps (previous build skipped Chromium).
+rm -rf "${OUT}/build/qt6webengine-6.4.3"
+rm -f "${OUT}/build/qt6webengine-6.4.3"/.stamp_* 2>/dev/null || true
+
 make -C "${BR}" O="${OUT}" olddefconfig
 
 echo "=== webengine-related config ==="
-grep -E 'QT6WEBENGINE|QT6WEBCHANNEL|QT6BASE_NETWORK|HOST_NODEJS|LIBNSS' "${CFG}" | head -40
+grep -E 'QT6WEBENGINE|QT6WEBCHANNEL|QT6DECLARATIVE|QT6SHADERTOOLS|QT6BASE_NETWORK|HOST_NODEJS|LIBNSS' "${CFG}" | head -40
 
 echo "INSTALL_OK"
-echo "Next: make -C ${BR} O=${OUT} qt6webengine"
-echo "  (or: ${ROOT}/scripts/buildroot/build-qt6webengine.sh)"
+echo "Next: ${ROOT}/scripts/buildroot/build-qt6webengine.sh"

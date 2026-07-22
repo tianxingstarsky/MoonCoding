@@ -1,0 +1,10 @@
+config BR2_PACKAGE_QT6DECLARATIVE
+	bool "qt6declarative"
+	select BR2_PACKAGE_QT6SHADERTOOLS
+	select BR2_PACKAGE_QT6BASE_GUI
+	select BR2_PACKAGE_QT6BASE_NETWORK
+	help
+	  Qt Declarative / Quick (QML). Required by Qt WebEngine even
+	  when using QWebEngineView (Widgets).
+
+	  https://doc.qt.io/qt-6/qtdeclarative-index.html
