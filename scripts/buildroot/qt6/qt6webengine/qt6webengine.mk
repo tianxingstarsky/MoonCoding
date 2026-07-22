@@ -38,6 +38,7 @@ QT6WEBENGINE_CONF_OPTS = \
 	-DQT_FEATURE_qtpdf_build=OFF \
 	-DQT_FEATURE_webengine_system_ninja=ON \
 	-DQT_FEATURE_webengine_system_freetype=OFF \
+	-DQT_FEATURE_qtwebengine_quick_build=OFF \
 	-DQT_FEATURE_webengine_proprietary_codecs=OFF \
 	-DQT_FEATURE_webengine_webrtc=OFF \
 	-DQT_FEATURE_webengine_kerberos=OFF \
