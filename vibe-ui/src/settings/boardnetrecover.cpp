@@ -3,6 +3,7 @@
 #include <QCoreApplication>
 #include <QFile>
 #include <QFileDevice>
+#include <QList>
 #include <QProcess>
 #include <QTimer>
 
@@ -27,12 +28,28 @@ QString gatewayFromHex(const QByteArray &hex)
         .arg((le >> 24) & 0xff);
 }
 
-// Returns {hasWlanDefault, gatewayIp}. Ignores usb0/eth defaults.
-std::pair<bool, QString> wlanDefaultRoute()
+bool isLoopbackIface(const QByteArray &name)
 {
+    return name == "lo" || name.startsWith("lo:");
+}
+
+bool isWirelessIface(const QByteArray &name)
+{
+    return name.startsWith("wlan") || name.startsWith("wl");
+}
+
+struct DefaultRoute {
+    QByteArray iface;
+    QString gateway;
+};
+
+// All IPv4 default routes (any NIC). Do not hard-require wlan0 — boards often use eth/usb.
+QList<DefaultRoute> listDefaultRoutes()
+{
+    QList<DefaultRoute> out;
     QFile route(QStringLiteral("/proc/net/route"));
     if (!route.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        return {false, {}};
+        return out;
     }
     route.readLine();
     while (!route.atEnd()) {
@@ -41,25 +58,27 @@ std::pair<bool, QString> wlanDefaultRoute()
         if (cols.size() < 3) {
             continue;
         }
-        if (cols.at(0) != "wlan0" || cols.at(1) != "00000000") {
+        if (cols.at(1) != "00000000" || isLoopbackIface(cols.at(0))) {
             continue;
         }
-        return {true, gatewayFromHex(cols.at(2))};
+        const QString gw = gatewayFromHex(cols.at(2));
+        if (gw.isEmpty()) {
+            continue;
+        }
+        out.push_back(DefaultRoute{cols.at(0), gw});
     }
-    return {false, {}};
+    return out;
 }
 
-// AIC8800 can show ARP COMPLETE (0x2) while 100% packet loss — must ping GW.
-bool pingGatewayOnce(int timeoutMs)
+bool pingHostOnce(const QString &host, int timeoutMs)
 {
-    const auto [hasRoute, gw] = wlanDefaultRoute();
-    if (!hasRoute || gw.isEmpty()) {
+    if (host.isEmpty()) {
         return false;
     }
     QProcess ping;
     ping.start(QStringLiteral("ping"),
                {QStringLiteral("-c"), QStringLiteral("1"), QStringLiteral("-W"),
-                QStringLiteral("2"), gw});
+                QStringLiteral("2"), host});
     if (!ping.waitForFinished(qMax(500, timeoutMs))) {
         ping.kill();
         ping.waitForFinished(300);
@@ -68,9 +87,26 @@ bool pingGatewayOnce(int timeoutMs)
     return ping.exitCode() == 0;
 }
 
+// Product datapath: any working default route.
+// - Prefer ICMP to gateway (detects AIC8800 "zombie WiFi": route+ARP but 100% loss).
+// - Wired (eth/usb/en…): default route alone is enough when ICMP is filtered.
 bool hasProductDatapathFast()
 {
-    return pingGatewayOnce(2500);
+    const QList<DefaultRoute> routes = listDefaultRoutes();
+    if (routes.isEmpty()) {
+        return false;
+    }
+    for (const DefaultRoute &r : routes) {
+        if (pingHostOnce(r.gateway, 2000)) {
+            return true;
+        }
+    }
+    for (const DefaultRoute &r : routes) {
+        if (!isWirelessIface(r.iface)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace
@@ -97,8 +133,7 @@ QByteArray boardNetRecoverScriptBytes()
 bool boardNetPingInternet(int timeoutMs)
 {
     Q_UNUSED(timeoutMs);
-    // Instant sysfs/proc check only — no ICMP on the UI thread.
-    // Requires wlan0 default route and non-incomplete gateway ARP.
+    // Any usable product datapath (wired or wireless). Do not require wlan0.
     return hasProductDatapathFast();
 }
 
@@ -202,7 +237,7 @@ void BoardNetRecover::onProcessFinished()
     if (ok) {
         m_log.append(QStringLiteral("\n[board-net] recover ok"));
     } else {
-        m_log.append(QStringLiteral("\n[board-net] still no wlan datapath"));
+        m_log.append(QStringLiteral("\n[board-net] still no product datapath (wired/wireless)"));
     }
     finishWith(ok, m_log.trimmed());
 }
