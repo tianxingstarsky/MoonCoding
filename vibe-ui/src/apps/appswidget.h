@@ -23,6 +23,9 @@ class RustBridge;
 
 /// Single-project app surface: preview workspace/index.html + browse project files.
 /// Multi-app sidebar is retired (one program per project).
+///
+/// Preview backend (`backend.py`) is project-scoped: auto-started on preview,
+/// may keep running while switching Chat/Tree; destroyed on workspace switch / stop.
 class AppsWidget final : public QWidget
 {
     Q_OBJECT
@@ -37,7 +40,7 @@ public:
     /// Call once before QApplication when WebEngine may be used (board/desktop).
     static void prepareWebEngineEnvironment();
 
-    /// Handle mooncoding://backend/start|stop from preview links.
+    /// Handle mooncoding://backend/start|stop from preview links (manual override).
     void handleMooncodingUrl(const QUrl &url);
 
 signals:
@@ -56,11 +59,24 @@ private:
     void loadIndexHtml();
     void populateFileList();
     void startBackend();
+    void ensureBackendRunning();
+    void updateBackendButton();
+    void writeBackendLease(qint64 pid, quint16 port);
+    void clearBackendLease();
+    bool adoptRunningLease();
+    void killLeasePidIfAny();
+    void injectApiBase();
+    quint16 backendPort() const;
+    QString backendApiBase() const;
+    QString backendScriptPath() const;
+    QString backendLeasePath() const;
+    bool hasBackendScript() const;
     QString languageForPath(const QString &path) const;
     QString previewModeLabel() const;
 
     RustBridge *m_bridge = nullptr;
     QString m_workspace;
+    quint16 m_backendPort = 0;
 
     QStackedWidget *m_stack = nullptr;
     QWidget *m_previewPage = nullptr;

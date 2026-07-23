@@ -9,11 +9,11 @@
 <body>
 <main>
   <h1 id="title">竖屏预览</h1>
-  <p class="hint">若样式与按钮可点，说明 WebEngine/CSS/JS 生效。</p>
+  <p class="hint">打开预览即自动起 backend.py；切 Chat 可后台保留，换项目会销毁。</p>
   <button id="bump" type="button">点我 +1</button>
   <p>计数：<span id="count">0</span></p>
-  <p><a href="mooncoding://backend/start">启动后端</a> ·
-     <a href="mooncoding://backend/stop">停止后端</a></p>
+  <p id="api">API：…</p>
+  <p id="health">后端：检测中…</p>
 </main>
 <script src="app.js"></script>
 </body>
