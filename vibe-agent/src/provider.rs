@@ -133,6 +133,7 @@ impl OpenAiCompatible {
         temperature: f64,
     ) -> Result<Self> {
         let client = Client::builder()
+            .user_agent("MoonCoding/1.0 (+https://github.com/tianxingstarsky/Creat_in_Box_for_EDU)")
             .connect_timeout(std::time::Duration::from_secs(CONNECT_TIMEOUT_SECS))
             // Long reasoning streams must not die at 2 minutes mid-thought.
             .timeout(std::time::Duration::from_secs(TIMEOUT_SECS))
