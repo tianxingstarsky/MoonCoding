@@ -177,9 +177,39 @@ Host contract:
 - Port is assigned by the host from the workspace path (`MOONCODING_BACKEND_PORT`,
   `MOONCODING_BACKEND_HOST=127.0.0.1`, `MOONCODING_API_BASE=http://127.0.0.1:<port>`).
 - Prefer binding that host/port. Print one line `READY <url-or-message>` on stdout when usable.
-- Preview injects `window.__MOONCODING_API_BASE__` for the front-end.
+- Preview **injects** `window.__MOONCODING_API_BASE__` before page scripts. Do **not**
+  invent ports or hardcode `localhost:8000`. Front-end must use the injected base.
 - Optional links `mooncoding://backend/start|stop` still work as manual overrides.
 - Use stdlib only (no pip).
+
+### Minimal scaffolds (copy this pattern)
+
+`backend.py` (binds host port only):
+```python
+import json, os
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+HOST = os.environ.get("MOONCODING_BACKEND_HOST", "127.0.0.1")
+PORT = int(os.environ.get("MOONCODING_BACKEND_PORT", "18765"))
+API = os.environ.get("MOONCODING_API_BASE", f"http://{HOST}:{PORT}")
+class H(BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self):
+        body = json.dumps({"ok": True, "api_base": API}).encode()
+        self.send_response(200); self.send_header("Content-Type", "application/json")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+print(f"READY {API}", flush=True)
+ThreadingHTTPServer((HOST, PORT), H).serve_forever()
+```
+
+`app.js` (always read injected base):
+```javascript
+function apiBase() {
+  return (typeof window.__MOONCODING_API_BASE__ === "string" && window.__MOONCODING_API_BASE__)
+    || "";
+}
+fetch(apiBase() + "/").then(r => r.json()).then(console.log).catch(console.error);
+```
 
 LLM **must** call tool `preview_backend` with `action=stop` before editing/replacing
 `backend.py`, when the port is busy, or before finishing work that leaves a live
