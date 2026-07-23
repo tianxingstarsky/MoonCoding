@@ -1,0 +1,126 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:       mooncoding
+# Required-Start: $local_fs
+# Required-Stop:  $local_fs
+# Default-Start:  S
+# Default-Stop:   K
+# Description:    Start MoonCoding board UI (linuxfb)
+### END INIT INFO
+
+RUN_SCRIPT=/root/mooncoding/run-mooncoding.sh
+NET_SCRIPT=/root/mooncoding/board-net-ready.sh
+WD_SCRIPT=/root/mooncoding/wifi-watchdog.sh
+BABYSIT_SCRIPT=/root/mooncoding/mooncoding-babysit.sh
+AIC_PS_SCRIPT=/root/mooncoding/aic-powersave-off.sh
+LOG=/tmp/mooncoding.log
+BIN=/root/mooncoding/mooncoding
+
+wait_for_fb() {
+	i=0
+	while [ $i -lt 30 ]; do
+		[ -e /dev/fb0 ] && return 0
+		sleep 0.5
+		i=$((i + 1))
+	done
+	return 1
+}
+
+wait_for_wlan_brief() {
+	# USB WiFi often enumerates a few seconds after boot.
+	i=0
+	while [ $i -lt 30 ]; do
+		[ -e /sys/class/net/wlan0 ] && return 0
+		sleep 0.5
+		i=$((i + 1))
+	done
+	return 1
+}
+
+start_watchdog() {
+	[ -f "$WD_SCRIPT" ] || return 0
+	chmod +x "$WD_SCRIPT" 2>/dev/null || true
+	killall -q wifi-watchdog.sh 2>/dev/null || true
+	# Match by pidfile inside script; start detached.
+	nohup sh "$WD_SCRIPT" >/dev/null 2>&1 &
+}
+
+start_babysit() {
+	[ -f "$BABYSIT_SCRIPT" ] || return 0
+	chmod +x "$BABYSIT_SCRIPT" 2>/dev/null || true
+	killall -q mooncoding-babysit.sh 2>/dev/null || true
+	nohup sh "$BABYSIT_SCRIPT" >/dev/null 2>&1 &
+}
+
+start() {
+	printf "Starting mooncoding: "
+	[ -x "$BIN" ] || [ -f "$BIN" ] || {
+		echo "FAIL (missing $BIN)"
+		return 1
+	}
+	[ -f "$RUN_SCRIPT" ] || {
+		echo "FAIL (missing $RUN_SCRIPT)"
+		return 1
+	}
+	chmod +x "$BIN" "$RUN_SCRIPT" "$NET_SCRIPT" "$WD_SCRIPT" "$BABYSIT_SCRIPT" "$AIC_PS_SCRIPT" 2>/dev/null || true
+	if pidof mooncoding >/dev/null 2>&1; then
+		echo "already running"
+		start_watchdog
+		start_babysit
+		return 0
+	fi
+	wait_for_fb || true
+	wait_for_wlan_brief || true
+	: >"$LOG"
+	# Disable AIC8800 power-save once per boot (common idle drop cause).
+	if [ -f "$AIC_PS_SCRIPT" ]; then
+		sh "$AIC_PS_SCRIPT" >>"$LOG" 2>&1 || true
+	fi
+	if [ -x "$NET_SCRIPT" ] || [ -f "$NET_SCRIPT" ]; then
+		sh "$NET_SCRIPT" >>"$LOG" 2>&1 || true
+	fi
+	start_watchdog
+	start_babysit
+	sleep 1
+	nohup sh "$RUN_SCRIPT" >>"$LOG" 2>&1 &
+	echo "OK"
+}
+
+stop() {
+	printf "Stopping mooncoding: "
+	killall mooncoding 2>/dev/null || true
+	if [ -f /var/run/mooncoding-wifi-watchdog.pid ]; then
+		kill "$(cat /var/run/mooncoding-wifi-watchdog.pid)" 2>/dev/null || true
+		rm -f /var/run/mooncoding-wifi-watchdog.pid
+	fi
+	if [ -f /var/run/mooncoding-ui-babysit.pid ]; then
+		kill "$(cat /var/run/mooncoding-ui-babysit.pid)" 2>/dev/null || true
+		rm -f /var/run/mooncoding-ui-babysit.pid
+	fi
+	killall -q wifi-watchdog.sh mooncoding-babysit.sh 2>/dev/null || true
+	echo "done"
+}
+
+restart() {
+	stop
+	sleep 1
+	start
+}
+
+case "$1" in
+start)
+	start
+	;;
+stop)
+	stop
+	;;
+restart|reload)
+	restart
+	;;
+*)
+	echo "Usage: $0 {start|stop|restart}"
+	exit 1
+	;;
+esac
+
+exit $?

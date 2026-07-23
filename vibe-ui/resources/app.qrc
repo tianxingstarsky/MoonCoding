@@ -1,0 +1,9 @@
+<RCC>
+    <qresource prefix="/">
+        <file>styles/dark.qss</file>
+        <file>styles/light.qss</file>
+    </qresource>
+    <qresource prefix="/board">
+        <file alias="board-net-ready.sh">board/board-net-ready.sh</file>
+    </qresource>
+</RCC>

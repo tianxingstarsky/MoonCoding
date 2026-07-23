@@ -10,7 +10,9 @@ pub struct GrepTool;
 
 #[async_trait]
 impl Tool for GrepTool {
-    fn name(&self) -> &str { "grep" }
+    fn name(&self) -> &str {
+        "grep"
+    }
     fn description(&self) -> &str {
         "Fast content search tool. Searches file contents using regular expressions. \
          Supports full regex syntax. Returns file paths and line numbers with matching lines. \
@@ -32,10 +34,74 @@ impl Tool for GrepTool {
         let dir = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
         let include = args.get("include").and_then(|v| v.as_str()).unwrap_or("*");
 
-        let search_dir = if dir.is_empty() { ctx.workspace.clone() } else { PathBuf::from(dir) };
+        let workspace = match ctx.workspace.canonicalize() {
+            Ok(path) => path,
+            Err(error) => {
+                return ToolResult {
+                    output: format!("workspace error: {error}"),
+                    exit_code: 1,
+                    duration_ms: 0,
+                    truncated: false,
+                }
+            }
+        };
+        let requested = if dir.is_empty() {
+            workspace.clone()
+        } else {
+            let path = PathBuf::from(dir);
+            if path.is_absolute() {
+                path
+            } else {
+                workspace.join(path)
+            }
+        };
+        let search_dir = match requested.canonicalize() {
+            Ok(path) if path.starts_with(&workspace) => path,
+            Ok(path) => {
+                return ToolResult {
+                    output: format!("refused: {} is outside workspace", path.display()),
+                    exit_code: 126,
+                    duration_ms: 0,
+                    truncated: false,
+                }
+            }
+            Err(error) => {
+                return ToolResult {
+                    output: format!("path error: {error}"),
+                    exit_code: 1,
+                    duration_ms: 0,
+                    truncated: false,
+                }
+            }
+        };
+
+        // Hard gate: grepping a single code file is the same footgun as plain read.
+        if search_dir.is_file() {
+            let rel = search_dir
+                .strip_prefix(&workspace)
+                .map(|p| crate::tools::blockgate::to_posix_rel(&p.to_string_lossy()))
+                .unwrap_or_else(|_| dir.to_string());
+            if crate::tools::blockgate::is_code_surface(&rel) {
+                let meta = crate::tools::blockgate::find_blockset(&ctx.workspace, &rel);
+                return ToolResult {
+                    output: crate::tools::blockgate::refuse_code_read(&rel, meta.as_ref()),
+                    exit_code: 126,
+                    duration_ms: 0,
+                    truncated: false,
+                };
+            }
+        }
+
         let re = match Regex::new(pattern) {
             Ok(r) => r,
-            Err(e) => return ToolResult { output: format!("regex err: {}", e), exit_code: 1, duration_ms: 0, truncated: false },
+            Err(e) => {
+                return ToolResult {
+                    output: format!("regex err: {}", e),
+                    exit_code: 1,
+                    duration_ms: 0,
+                    truncated: false,
+                }
+            }
         };
 
         let start = std::time::Instant::now();
@@ -43,24 +109,35 @@ impl Tool for GrepTool {
         let mut matched = 0usize;
         let max_lines = 200usize;
 
-        let mut walker = walkdir::WalkDir::new(&search_dir)
+        let walker = walkdir::WalkDir::new(&search_dir)
             .max_depth(10)
             .follow_links(false)
             .into_iter()
             .filter_entry(|e| !is_hidden(e) && !is_vibe_dir(e));
 
         for entry in walker.flatten() {
-            if matched >= max_lines { break; }
-            if !entry.file_type().is_file() { continue; }
-            if !simple_glob_match(include, entry.file_name().to_string_lossy().as_ref()) { continue; }
+            if matched >= max_lines {
+                break;
+            }
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            if !simple_glob_match(include, entry.file_name().to_string_lossy().as_ref()) {
+                continue;
+            }
             let content = match fs::read_to_string(entry.path()) {
                 Ok(c) => c,
                 Err(_) => continue,
             };
             for (line_no, line) in content.lines().enumerate() {
-                if matched >= max_lines { break; }
+                if matched >= max_lines {
+                    break;
+                }
                 if re.is_match(line) {
-                    let rel = entry.path().strip_prefix(&search_dir).unwrap_or(entry.path());
+                    let rel = entry
+                        .path()
+                        .strip_prefix(&search_dir)
+                        .unwrap_or(entry.path());
                     out.push_str(&format!("{}:{} {}\n", rel.display(), line_no + 1, line));
                     matched += 1;
                 }
@@ -70,12 +147,21 @@ impl Tool for GrepTool {
             out.push_str(&format!("(truncated at {} matches)", max_lines));
         }
         let ms = start.elapsed().as_millis() as u64;
-        ToolResult { output: out, exit_code: 0, duration_ms: ms, truncated: matched >= max_lines }
+        ToolResult {
+            output: out,
+            exit_code: 0,
+            duration_ms: ms,
+            truncated: matched >= max_lines,
+        }
     }
 }
 
 fn is_hidden(entry: &walkdir::DirEntry) -> bool {
-    entry.file_name().to_str().map(|s| s.starts_with('.')).unwrap_or(false)
+    entry
+        .file_name()
+        .to_str()
+        .map(|s| s.starts_with('.'))
+        .unwrap_or(false)
 }
 
 fn is_vibe_dir(entry: &walkdir::DirEntry) -> bool {
@@ -83,7 +169,11 @@ fn is_vibe_dir(entry: &walkdir::DirEntry) -> bool {
 }
 
 fn simple_glob_match(pattern: &str, name: &str) -> bool {
-    if pattern == "*" { return true; }
+    if pattern == "*" {
+        return true;
+    }
     let re_str = regex::escape(pattern).replace("\\*", ".*");
-    Regex::new(&format!("^{}$", re_str)).map(|r| r.is_match(name)).unwrap_or(true)
+    Regex::new(&format!("^{}$", re_str))
+        .map(|r| r.is_match(name))
+        .unwrap_or(true)
 }

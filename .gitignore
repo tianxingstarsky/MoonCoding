@@ -2,25 +2,33 @@
 target/
 *.lock
 
+# Local / CI build trees (never commit — GB-scale Qt/WebEngine stages)
+build/
+build-board/
+build-linux/
+_probe_out.txt
+
 # vibe-test run outputs
 vibe-test/runs/
 
 # local vibe workdirs
 .vibe/
 
-# third-party source
+# third-party source archives (keep extracted code only if needed)
 opencode-1.17.13/
+*.zip
 
 # local test workspace
 test_project/
 
-# misc leftovers
-_out.py
-draft.txt
-*.zip
-
-# vibe-agent session data
+# vibe-agent session data / local caches
 .mooncoding/
-_out.py
-draft.txt
-*.zip
+**/sessions/
+**/fontconfig-cache/
+
+# Editor / OS junk
+.DS_Store
+Thumbs.db
+*.user
+*.autosave
+CMakeLists.txt.user

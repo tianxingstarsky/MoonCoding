@@ -10,10 +10,9 @@ max_tokens = 4096
 temperature = 0.1
 
 [agent]
-max_steps = 40
+max_steps = 200
 prune_after = 12
 prune_keep = 6
-tree_enabled = false    # Phase B: enable tree-based project management
 
 # For local ollama:
 # [provider]

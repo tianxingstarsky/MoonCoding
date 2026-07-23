@@ -1,0 +1,4 @@
+Google Pinyin IME engine (Android Open Source Project)
+Licensed under the Apache License, Version 2.0.
+Source vendored from community pinyinime packaging of AOSP PinyinIME.
+Dictionary: dict_pinyin.dat (system dictionary from the same lineage).

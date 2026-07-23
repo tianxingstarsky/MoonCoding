@@ -1,13 +1,22 @@
-# MoonCoding — Block-Set Vibe Coding CLI
+# MoonCoding — Human-directed coding workspace
 
-> **Block-level code editing for AI agents**. No more whole-file line-locking.
+> A cross-platform Qt desktop coding agent with a persistent, human-editable project
+> tree and a byte-safe Rust block editing engine.
 
 ## What
 
-MoonCoding is a novel vibe-coding protocol and CLI: instead of letting AI edit code files
-line-by-line (fragile, error-prone), it splits code into **function-level blocks**.
-AI reads only the blocks it needs, edits whole blocks atomically, and the tool
-re-assembles source files byte-perfect.
+MoonCoding combines a Qt 6 desktop workspace, a Rust agent backend, and the `vibe`
+block protocol. Instead of reducing a project to a flat plan, the agent maintains a
+persistent tree of features, branches, decisions, tests, evidence, and associated files.
+Human changes are tracked at field level and cannot be silently overwritten by the AI.
+
+Code editing remains function-level and byte-safe: AI reads only the blocks it needs,
+edits whole blocks atomically, and the engine reassembles source files byte-perfect.
+
+Project-specific engineering knowledge can be placed in `.mooncoding/knowledge/*.md`.
+The Rust backend chunks and locally embeds these files, then injects only the most
+relevant passages for the current request. Verified reusable lessons may also be
+persisted through the `memory` tool; secrets and temporary task state are rejected.
 
 | Traditional vibe coding | MoonCoding |
 |---|---|
@@ -21,25 +30,28 @@ re-assembles source files byte-perfect.
 
 ```
 MoonCoding/
-├── vibe/            # Main CLI: 12 commands (split, assemble, verify, overview, read, peek,
-│   ├── src/         #   insert, replace, drop, new, meta, lookup, linemap, deps)
-│   ├── test/        #   30+ regression tests (PowerShell suite)
-│   └── README.md    #   Full protocol manual
-│
-└── vibe-test/       # LLM test runner (DeepSeek v4-flash)
-    ├── src/         #   db, llm, runner, prompts, session, tools, report
-    ├── prompts/     #   system_prompt.md (~800-token agent prompt)
-    ├── fixtures/    #   Specs: 01-todo-min, 02-todo-with-css, 03-todo-refactor
-    └── runs/        #   (gitignored) JSONL + SQLite + workspace snapshots
+├── vibe/            # L1 byte-safe block protocol engine
+├── vibe-agent/      # Rust cdylib backend, agent loop, tools, project tree, SQLite
+├── vibe-ui/         # Qt 6 / C++ desktop interface
+└── CMakeLists.txt   # Unified CMake + Cargo build
 ```
 
 ## Quick start
 
 ```bash
-# 1. Build the CLI
-cd vibe && cargo build --release
+# Requirements: Rust stable, CMake 3.24+, Qt 6.5+
+cmake -S . -B build -DCMAKE_PREFIX_PATH=/path/to/Qt/6.x/gcc_64
+cmake --build build --config Release
 
-# 2. Split an existing Python file into function-level blocks
+# Launch against a workspace
+./build/vibe-ui/mooncoding --workspace /path/to/project
+
+# The L1 protocol can still be built and tested independently
+cd vibe
+cargo build --release
+powershell -File test/suite.ps1
+
+# Split an existing Python, Rust, or C++ file into AST-level blocks
 ./target/release/vibe split src/app.py --purpose "REST API entry"
 
 # 3. AI reads the file skeleton (block seqs + summaries + line ranges)
@@ -81,7 +93,7 @@ using ONLY vibe CLI commands — no manual file editing.
 | Command | Purpose |
 |---|---|
 | `new` | Create empty blockset |
-| `split` | Split existing Python file into blocks (tree-sitter AST) |
+| `split` | Split Python/Rust/C++ files into blocks (tree-sitter AST) |
 | `info` | Technical dump: ulid, byte offsets, symbols |
 | `overview` | AI-facing file skeleton |
 | `peek` | AI-facing one-block narrative |
@@ -137,7 +149,7 @@ using ONLY vibe CLI commands — no manual file editing.
 serde + serde_json    serialization
 sha2                 sha256 verification
 ulid                 global unique IDs
-tree-sitter          Python AST splitting
+tree-sitter          Python, Rust, and C++ AST splitting
 reqwest              HTTP client (vibe-test)
 rusqlite             session DB (vibe-test)
 tokio                async runtime (vibe-test)
@@ -157,4 +169,4 @@ Zero network dependencies at runtime (only compile-time crate downloads).
 | P6 line-map.json + lookup (error→block mapping) | ✅ |
 | P7 Cross-block symbol dependency WARN + deps command | ✅ |
 | P7.5 LLM test runner (DeepSeek v4-flash) | ✅ |
-| P8 Cross-language extension (Rust/TS/Go — plugin slot ready) | TBD |
+| P8 Cross-language extension | 🚧 Rust + C++ implemented; TS/Go pending |

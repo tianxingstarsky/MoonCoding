@@ -186,11 +186,13 @@ impl BlockSet {
         }
     }
 
-    /// 重新打包 code 字节区: 把 blocks[*].data 顺序拼接, 更新 byte_offset/byte_length/seq
+    /// 重新打包 code 字节区: 把 blocks[*].data 顺序拼接, 更新 byte_offset/byte_length/seq.
+    /// 每个非空块末尾自动补 `\n`，避免相邻块粘连（`}def foo`）。
     pub fn repack(&mut self, block_datas: Vec<Vec<u8>>) {
         self.code = Vec::new();
         let mut off = 0u64;
         for (i, data) in block_datas.into_iter().enumerate() {
+            let data = crate::assemble::ensure_trailing_newline(data);
             let len = data.len() as u64;
             if i < self.index.blocks.len() {
                 let blk = &mut self.index.blocks[i];
@@ -241,9 +243,13 @@ pub struct LineMap {
     pub source_sha256: String,
     pub line_count: usize,
     pub ranges: Vec<LineRange>,
+    /// When true, each range's first line is a `# === vibe:seq= ===` marker (local_line=0).
+    #[serde(default)]
+    pub marker_lines: bool,
 }
 
 impl LineMap {
+    /// Logical ranges from pure block bytes (no projection markers).
     pub fn from_blockset(bs: &BlockSet) -> Self {
         let mut ranges = Vec::with_capacity(bs.index.blocks.len());
         let mut line_count = 0usize;
@@ -258,6 +264,44 @@ impl LineMap {
             source_sha256: bs.index.fileset.source_sha256.clone(),
             line_count,
             ranges,
+            marker_lines: false,
+        }
+    }
+
+    /// Physical line ranges for the **disk projection** (includes Python vibe marker lines).
+    pub fn from_projection(bs: &BlockSet) -> Self {
+        use crate::assemble::uses_hash_line_markers;
+        let annotate = uses_hash_line_markers(&bs.index.fileset.lang);
+        let mut ranges = Vec::with_capacity(bs.index.blocks.len());
+        let mut line = 1usize;
+        for b in &bs.index.blocks {
+            let from = line;
+            if annotate {
+                line += 1; // marker line
+            }
+            let bytes = bs.block_bytes(b);
+            let nls = bytes.iter().filter(|&&c| c == b'\n').count();
+            let total = nls
+                + if !bytes.is_empty() && *bytes.last().unwrap() != b'\n' {
+                    1
+                } else {
+                    0
+                };
+            line += total;
+            let to = line.saturating_sub(1).max(from);
+            ranges.push(LineRange {
+                seq: b.seq,
+                from,
+                to,
+            });
+        }
+        let line_count = line.saturating_sub(1);
+        LineMap {
+            rev: bs.index.rev,
+            source_sha256: bs.index.fileset.source_sha256.clone(),
+            line_count,
+            ranges,
+            marker_lines: annotate,
         }
     }
 
@@ -275,6 +319,7 @@ impl LineMap {
     }
 
     /// 二分查找 line 落在哪个 range. 返回 (seq, local_line).
+    /// When `marker_lines`, local_line 0 = vibe marker comment; 1+ = code in that block.
     pub fn lookup(&self, line: usize) -> Option<(usize, usize)> {
         if line == 0 || line > self.line_count { return None; }
         let mut lo = 0isize;
@@ -284,7 +329,14 @@ impl LineMap {
             let r = &self.ranges[mid];
             if line < r.from { hi = mid as isize - 1; }
             else if line > r.to { lo = mid as isize + 1; }
-            else { return Some((r.seq, line - r.from + 1)); }
+            else {
+                let local = if self.marker_lines {
+                    line - r.from // 0 = marker
+                } else {
+                    line - r.from + 1
+                };
+                return Some((r.seq, local));
+            }
         }
         None
     }

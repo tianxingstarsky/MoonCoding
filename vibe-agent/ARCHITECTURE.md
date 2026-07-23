@@ -2,16 +2,19 @@
 
 ## 总览
 
-vibe-agent 是 MoonCoding 的 L2 交互智能体核心。它是一个**纯文本 CLI 代理**, 内置六个扩展槽,
-后续所有的工程化功能(TUI、HTTP API、树形项目管理、向量引导)都通过扩展现有槽来实现,
-**不会改动核心循环**。
+vibe-agent 是 MoonCoding 的无界面 Rust 后端，以 `rlib + cdylib` 交付。Qt UI 只通过
+`include/vibe_agent.h` 中的稳定 C ABI 访问它。legacy CLI 源码保留用于迁移，但默认 feature
+关闭、不参与产品构建。新功能继续通过扩展槽实现，不把 UI 状态写入 agent 核心循环。
 
 ## 数据流
 
 ```
              ┌─────────────────┐
-             │   main.rs       │ CLI 入口: chat / list / resume / tree
-             │   (clap parse)  │
+             │ Qt 6 / C++ UI   │ chat + editable project tree
+             └───────┬─────────┘
+                     │ C ABI + JSON events
+             ┌───────▼─────────┐
+             │ ffi / desktop   │ lifecycle, async thread, human tree actions
              └───────┬─────────┘
                      │
             ┌────────▼─────────┐
@@ -22,11 +25,11 @@ vibe-agent 是 MoonCoding 的 L2 交互智能体核心。它是一个**纯文本
       ┌────────▼──┐ ┌──▼──────────┐
       │ provider  │ │ tools/       │
       │ (LLM SSE) │ │ mod.rs       │ Registry
-      └───────────┘ │ ├── bash    │
+      └───────────┘ │ ├── verify_command │
                     │ ├── read    │
                     │ ├── grep    │
                     │ ├── glob    │
-                    │ ├── todowrite│
+                    │ ├── tree    │ persistent tree + human authority
                     │ └── vibe    │
                     └─────────────┘
 ```
@@ -66,12 +69,12 @@ Ollama、Groq、DeepSeek 都走此路径, 只需 base_url + model 不同
 ### 2. Tool (tools/mod.rs)
 Trait: `name / description / parameters (JSON Schema) / execute (args, ctx) → ToolResult`
 注册: `registry.register(MyTool)`
-所有工具共享 ToolContext { workspace, vibe_exe, session_id }
+所有工具共享 ToolContext { workspace, vibe_exe, session_id, project_tree, command_log }。
+`command_log` 记录本轮真实命令和退出码，TreeTool 只接受其中 exit=0 的命令作为 AI 完成证据。
 
 ### 3. AgentEvent (stream.rs)
 枚举: Thinking / TextDelta / TextDone / ToolCallStart / ToolCallResult / Done / TreeUpdated / Error / Interrupted
-CLI 消费: 匹配事件 → print 格式化行
-HTTP 消费: 匹配事件 → json SSE 推
+Qt 消费: RustBridge 将 JSON callback 排队转发为 Qt signals
 
 ### 4. Session (session.rs)
 Trait SessionStore: load / save / list / latest
@@ -80,21 +83,27 @@ Expansion: Postgres, JSONL, in-memory
 
 Session struct: id, provider, model, messages, step, tokens, project_tree, metadata
 
-### 5. ProjectTree (session.rs Session.project_tree)
-Phase A: Option::None (预留字段)
-Phase B: TreeTool implements Tool, 与 agent 共用同一 Session.project_tree
-CLI: `vibe-agent tree show/add/mark/review/focus`
+### 5. ProjectTree (tree.rs + tools/tree.rs)
+- `tree_version` 对每次写操作做 stale-write 防撞。
+- 每个节点记录 creator、last modifier、字段级 `human_locked_fields`、关联文件与验证证据。
+- AI 不能覆盖人工字段，也不能删除含人工节点/修改的分支。
+- AI 标记 completed 前必须有最新成功证据，且证据命令必须在本轮真实 exit=0；
+  父节点仍有未完成子节点时不能完成。
+- Qt 可创建/编辑/删除节点，修改状态，释放字段锁，并触发单节点或全树严格审视。
+- 每次 AI 树更新立即写 SQLite，不等待整轮结束。
 
 ### 6. Prompt (prompt.rs)
 PromptBuilder: personality + project_instructions + tool_descriptions + session_context
-扩展: `.with_vector_context(embeddings)` — Phase C
+`.with_vector_guidance(...)` 接收 `vector.rs` 的本地检索结果。KnowledgeBase 只索引
+`.mooncoding/knowledge/*.md|txt` 与 `agent-memory.jsonl`，采用 256 维哈希向量和余弦相似度，
+每轮最多注入 5 个相关块。`memory` tool 可搜索或持久化已验证工程经验，不扫描整个代码库。
 
 ## 配置
 
 三层覆盖:
 1. 环境变量: MOONCODING_BASE_URL / MOONCODING_MODEL / MOONCODING_API_KEY
 2. .mooncoding.toml (当前目录或 ~/.config/mooncoding/)
-3. CLI flags: --provider / --model / --base-url / --api-key
+3. Qt 设置覆盖（URL、model、agent 参数；API key 不由 UI 明文保存）
 
 ## 调试
 
@@ -102,16 +111,22 @@ PromptBuilder: personality + project_instructions + tool_descriptions + session_
 - provider: `cargo test provider` + curl 手动 SSE
 - tools: `cargo test tools` 各 tool 独立单元测试
 - agent: mock provider + assert AgentEvent 顺序
-- config: `println!("{:?}", Config::load())` 快速检查
+- config: 单元测试三层覆盖
+- tree: CRUD、版本冲突、环检测、人工字段锁、证据门禁
+- FFI: C 字符串所有权、树 JSON round-trip、callback 线程切换
+- Qt: `TreeModel` 层级、稳定 ID、状态与 ownership roles
 
 ## 文件依赖图
 
 ```
-main.rs
+lib.rs
+├── ffi.rs → desktop.rs → session.rs / tree.rs
 ├── config.rs (无内部依赖)
 ├── agent.rs
 │   ├── provider.rs
-│   ├── tools/mod.rs → tools/{bash,read,grep,glob,todowrite,vibe}.rs
+│   ├── tools/mod.rs → tools/{bash(verify_command),read,grep,glob,memory,tree,vibe}.rs
 │   ├── session.rs
+│   ├── tree.rs
+│   ├── vector.rs
 │   ├── prompt.rs
 │   └── stream.rs

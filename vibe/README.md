@@ -21,7 +21,7 @@
 ## 快速上手
 
 ```bash
-# 拆一个现有 Python 文件 → 生成区块集
+# 拆一个现有 Python / Rust / C++ 文件 → 生成区块集（按扩展名识别）
 vibe split src/app.py --purpose "REST API 入口"
 
 # AI 视角：粗取一份文件骨架
@@ -227,7 +227,8 @@ vibe linemap src/app.py             # dump 整张 line-map 调试用
 
 ## 跨块符号依赖告警（P7）
 
-每个块的字节本身就是合法的 Python（模块顶层的若干语句），所以 split / insert / replace 时程序自动 tree-sitter 解析一次提取符号：
+每个块保持源语言的合法字节片段，所以 split / insert / replace 时程序按 fileset.lang
+自动使用对应 tree-sitter grammar 提取符号：
 
 - `defines`: AST 里所有 `function_definition` / `class_definition` 的 `name` 字段。
 - `uses`: 该块字节里的所有 identifier（已去重、排除语言关键字、字符串字面量与注释里的假标识符不算）。
@@ -283,7 +284,7 @@ seq=4  def main(argv: List[str]) -> int:
 
 ---
 
-## Python 拆分边界规则（写进协议，由 tree-sitter 实现）
+## AST 拆分边界规则（写进协议，由 tree-sitter 实现）
 
 1. **实体首行开始切**：root 节点 named_children 中 `function_definition` / `class_definition` / `decorated_definition` 的 `start_byte` 即为新块起点。缩进的 `def`/`class` 是嵌套节点，归到父块。
 2. **装饰器链 + 被装饰 def/class 同块**：tree-sitter 把 `@deco1` `@deco2` `def f()` 包装到同一个 `decorated_definition` 节点，自然合成 1 块。
@@ -326,9 +327,9 @@ seq=4  def main(argv: List[str]) -> int:
 - `serde` / `serde_json` — 序列化 `index.json` / `line-map.json`
 - `sha2` — assemble 后字节校验
 - `ulid` — 全局唯一绑定ID
-- `tree-sitter` + `tree-sitter-python` — Python AST 拆分（不再用行级正则）
+- `tree-sitter-{python,rust,cpp}` — Python / Rust / C++ AST 拆分（不使用行级正则）
 
-零隐式网络依赖（仅 crate 编译期拉取源）。后续跨语言扩展只需新增对应 `tree-sitter-<lang>` crate。
+零隐式网络依赖（仅 crate 编译期拉取源）。后续语言仍通过新增 `tree-sitter-<lang>` grammar 扩展。
 
 ---
 
@@ -343,8 +344,8 @@ seq=4  def main(argv: List[str]) -> int:
 | P6 行号映射表 `line-map.json` 供 LSP/运行时错误直接映射到区块 | ✅ |
 | P5 tree-sitter 替换 `src/split.rs` 行级检测 | ✅ |
 | P7 跨块符号依赖告警（改 B 签名时通知 A） | ✅ |
-| P8 跨语言扩展（只做样板, 社区按插件插上 tree-sitter-<lang>） | 待做 |
-| P8 跨语言扩展（Rust/TS/Go，都走 tree-sitter） | 待做 |
+| P8 跨语言扩展（Rust + C++） | 已实现，待环境回归 |
+| P8 后续语言（TS/Go） | 待做 |
 
 ---
 

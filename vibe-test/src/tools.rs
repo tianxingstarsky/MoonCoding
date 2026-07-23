@@ -62,7 +62,8 @@ pub async fn bash(command: &str, workdir: Option<&str>, workspace: &Path, vibe_p
     let vibe_dir = std::path::Path::new(vibe_path).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
     if !vibe_dir.is_empty() {
         let cur_path = std::env::var("PATH").unwrap_or_default();
-        cmd.env("PATH", format!("{};{}", vibe_dir, cur_path));
+        let sep = if cfg!(windows) { ';' } else { ':' };
+        cmd.env("PATH", format!("{vibe_dir}{sep}{cur_path}"));
     }
     let child = cmd.spawn()?;
     let out = tokio::time::timeout(Duration::from_secs(TIMEOUT_SECS), child.wait_with_output()).await;

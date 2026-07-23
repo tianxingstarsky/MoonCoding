@@ -63,7 +63,8 @@ LLM 后端的抽象。`trait Provider` 的 `chat_stream(messages, tools, cb) →
 `trait SessionStore: { load, save, list, latest }`。当前是 SQLite 实现; 换 PostgreSQL 只换 impl。
 
 ### ProjectTree 槽
-`Session.project_tree: Option<ProjectTree>` — Phase B 落地。树形任务管理, 支持人工标注节点状态和重验需求。
+`Session.project_tree: Option<ProjectTree>` — 持久树形项目管理。节点记录状态、分支类型、关联文件、
+验证证据、修改者与字段级人工锁。AI 不得覆盖人工字段；没有成功证据不得自行标记完成。
 
 ### Prompt 槽
 `PromptBuilder` — agent 系统提示分层构造器:
@@ -71,7 +72,7 @@ LLM 后端的抽象。`trait Provider` 的 `chat_stream(messages, tools, cb) →
 - `project_instructions` (AGENTS.md 扫描)
 - `tool_descriptions` (ToolRegistry 自动生成)
 - `session_context` (剪枝标记 + TODO 状态)
-- 将来: `vector_context` (海量向量引导注入锚)
+- `vector_guidance`：从 `.mooncoding/knowledge` 与已验证 memory 中只检索当前任务相关片段
 
 ## 两类角色
 
@@ -84,9 +85,9 @@ AI 必须填写或显式声明的字段: `purpose`, `tail.{purpose, summary}`, `
 ## Agent 交互模型
 
 ```
-用户输入任务 (vibe-agent chat)
+用户在 Qt 桌面输入任务
     ↓
-Agent 先写 TODO 树 (todowrite, 支持 parent_id 层级)
+Agent 先通过 tree tool 画持久项目树
     ↓
 Agent 扫描项目 (read/grep/glob)
     ↓
@@ -98,14 +99,14 @@ Agent 用 vibe 协议编辑代码 (vibe tool: insert/replace/drop/assemble/verif
     ↓
 上下文剪枝: 12 步后保留最近 6 个 assistant 轮次
     ↓
-用户检查/强驱 (修改树节点, 标注重验, 手动调节计划)
+用户点击检查/强驱 (修改树节点/状态, 创建分支, 单节点或全树审视)
 ```
 
 ## 与 opencode 的关键差异
 
 | | opencode | MoonCoding |
 |---|---|---|
-| 任务管理 | 扁平 TODO (todowrite) | 树形 (parent_id 层级) |
+| 任务管理 | 扁平 TODO | 持久树 + 字段级人工权威 + 验证证据 |
 | 编辑模型 | 整文件行锁 | 区块级整块替换 |
 | 用户角色 | 可用打断, 不能重塑 | 人工强驱: 画树, 标注, 修改 |
 | 权限 | Deferred ask 完整版 | v1 沙箱白名单, v2 加人工审批 |

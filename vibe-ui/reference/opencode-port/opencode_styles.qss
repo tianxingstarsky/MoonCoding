@@ -1,0 +1,1396 @@
+/* =============================================================================
+ * opencode_styles.qss — Complete opencode desktop v2 dark theme
+ *
+ * opencode desktop v2 design language:
+ *   - Near-black canvas: #0d1117
+ *   - Muted surfaces: #161b22, #21262d
+ *   - Blue accent: #58a6ff (primary)
+ *   - Green success: #3fb950
+ *   - Red error/danger: #f85149
+ *   - Orange warning: #d29922
+ *   - Muted text: #8b949e
+ *   - Primary text: #c9d1d9 / #e6edf3
+ *   - Borders: #30363d (subtle), #21262d (dim)
+ *   - Border radius: 4-6px (cards), 2px (accent bars)
+ *   - Flat design: no heavy shadows, tonal elevation
+ *   - Hover states on ALL interactive elements
+ *   - Touch-safe: minimum 32px tap targets
+ *
+ * Typography:
+ *   - UI: Microsoft YaHei / Segoe UI / PingFang SC / Noto Sans CJK SC
+ *   - Code: Consolas / IBM Plex Mono / Cascadia Code / monospace
+ *   - Anti-aliasing applied globally via opencode::applyFontConfig()
+ *
+ * Sections:
+ *   1. Global & Base
+ *   2. Main Window & Menu Bar
+ *   3. Tab Bar
+ *   4. Home Page
+ *   5. Session View & Splitter
+ *   6. Chat/Messages (MessageBlock, ChatScrollArea)
+ *   7. Tool Blocks
+ *   8. Composer & Input
+ *   9. File Tree
+ *  10. Diff View
+ *  11. Dialogs (Settings, Permission, Command Palette, Model Picker)
+ *  12. Buttons
+ *  13. Scrollbars
+ *  14. Status Bar & Tooltips
+ *  15. Tables & Lists
+ *  16. Responsive Breakpoints
+ * ============================================================================= */
+
+/* ===========================================================================
+ * 1. GLOBAL & BASE
+ * =========================================================================== */
+
+/* Apply to known container widgets only — bare QWidget breaks buttons/inputs */
+QMainWindow,
+#CentralWidget,
+#ViewStack,
+#MessageContainer,
+#ChatScrollArea {
+    background-color: #0d1117;
+    color: #c9d1d9;
+    font-family: "Microsoft YaHei", "Segoe UI", "PingFang SC",
+                 "Noto Sans CJK SC", "Helvetica Neue", Arial, sans-serif;
+    font-size: 14px;
+}
+
+QLabel {
+    background-color: transparent;
+    color: #c9d1d9;
+}
+
+QTextBrowser {
+    background-color: transparent;
+    color: #c9d1d9;
+}
+
+QPlainTextEdit {
+    background-color: transparent;
+    color: #c9d1d9;
+}
+
+QLineEdit {
+    background-color: #0d1117;
+    color: #c9d1d9;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 13px;
+    min-height: 32px;
+    selection-background-color: #264f78;
+}
+
+QLineEdit:focus {
+    border-color: #58a6ff;
+}
+
+QLineEdit:hover {
+    border-color: #484f58;
+}
+
+QComboBox {
+    background-color: #161b22;
+    color: #c9d1d9;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 13px;
+    min-height: 32px;
+}
+
+QComboBox:hover {
+    border-color: #484f58;
+}
+
+QComboBox:focus {
+    border-color: #58a6ff;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #161b22;
+    color: #c9d1d9;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    selection-background-color: #1f6feb;
+    selection-color: #ffffff;
+    padding: 4px;
+}
+
+QCheckBox {
+    color: #c9d1d9;
+    spacing: 8px;
+    font-size: 13px;
+}
+
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    background-color: #161b22;
+}
+
+QCheckBox::indicator:hover {
+    border-color: #58a6ff;
+}
+
+QCheckBox::indicator:checked {
+    background-color: #1f6feb;
+    border-color: #1f6feb;
+}
+
+QGroupBox {
+    color: #c9d1d9;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    margin-top: 8px;
+    padding-top: 16px;
+    font-weight: bold;
+    font-size: 13px;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 6px;
+}
+
+/* ===========================================================================
+ * 2. MAIN WINDOW & MENU BAR
+ * =========================================================================== */
+
+QMainWindow {
+    background-color: #0d1117;
+}
+
+QMainWindow::separator {
+    width: 1px;
+    background-color: #30363d;
+}
+
+QMenuBar {
+    background-color: #161b22;
+    color: #c9d1d9;
+    border-bottom: 1px solid #30363d;
+    padding: 2px 8px;
+    font-size: 13px;
+}
+
+QMenuBar::item {
+    padding: 6px 12px;
+    border-radius: 4px;
+}
+
+QMenuBar::item:selected {
+    background-color: #21262d;
+}
+
+QMenuBar::item:pressed {
+    background-color: #30363d;
+}
+
+QMenu {
+    background-color: #161b22;
+    color: #c9d1d9;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 4px 0;
+}
+
+QMenu::item {
+    padding: 6px 32px 6px 24px;
+    font-size: 13px;
+}
+
+QMenu::item:selected {
+    background-color: #1f6feb;
+    color: #ffffff;
+}
+
+QMenu::separator {
+    height: 1px;
+    background-color: #30363d;
+    margin: 4px 12px;
+}
+
+QMenu::indicator {
+    margin-left: 4px;
+}
+
+/* ===========================================================================
+ * 3. TAB BAR — Chrome-style tabs
+ * =========================================================================== */
+
+QTabBar {
+    background-color: #161b22;
+    border-bottom: 1px solid #30363d;
+}
+
+QTabBar::tab {
+    background-color: #161b22;
+    color: #8b949e;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 8px 16px;
+    margin-right: 2px;
+    font-size: 13px;
+    min-height: 36px;
+    min-width: 80px;
+}
+
+QTabBar::tab:hover {
+    background-color: #21262d;
+    color: #c9d1d9;
+}
+
+QTabBar::tab:selected {
+    background-color: #0d1117;
+    color: #e6edf3;
+    border-bottom: 2px solid #58a6ff;
+}
+
+QTabBar::tab:first {
+    /* Home tab */
+    min-width: 40px;
+    font-size: 16px;
+}
+
+QTabBar::close-button {
+    image: none;
+    background-color: transparent;
+    border-radius: 4px;
+    padding: 2px;
+}
+
+QTabBar::close-button:hover {
+    background-color: #30363d;
+}
+
+QTabBar::scroller {
+    width: 20px;
+}
+
+/* Tab preview popover */
+#TabPreview {
+    background-color: #21262d;
+    color: #c9d1d9;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+}
+
+#TabPreviewName {
+    color: #e6edf3;
+    font-weight: bold;
+    font-size: 14px;
+}
+
+#TabPreviewPath {
+    color: #8b949e;
+    font-size: 11px;
+}
+
+#TabPreviewBranch {
+    color: #58a6ff;
+    font-size: 11px;
+    font-family: "Consolas", "IBM Plex Mono", monospace;
+}
+
+#TabPreviewTime {
+    color: #484f58;
+    font-size: 11px;
+}
+
+/* ===========================================================================
+ * 4. HOME PAGE
+ * =========================================================================== */
+
+#HomeWidget {
+    background-color: #0d1117;
+}
+
+#HomeHeader {
+    background-color: #0d1117;
+    border-bottom: 1px solid #30363d;
+}
+
+#HomeTitle {
+    color: #e6edf3;
+    font-size: 20px;
+}
+
+#HomeSearch {
+    min-width: 200px;
+}
+
+#HomeScrollArea {
+    background-color: transparent;
+    border: none;
+}
+
+#HomeEmptyState {
+    padding: 60px 40px;
+}
+
+#HomeEmptyTitle {
+    color: #8b949e;
+    font-size: 18px;
+}
+
+#HomeEmptyText {
+    color: #484f58;
+    font-size: 14px;
+    margin-bottom: 16px;
+}
+
+#HomeEmptyBtn {
+    background-color: #238636;
+    color: #ffffff;
+    border: 1px solid #2ea043;
+    border-radius: 6px;
+    font-weight: bold;
+    font-size: 14px;
+    min-height: 40px;
+    min-width: 160px;
+}
+
+#HomeEmptyBtn:hover {
+    background-color: #2ea043;
+}
+
+#HomeSectionHeader {
+    color: #8b949e;
+    font-size: 12px;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    padding: 8px 0 4px 0;
+}
+
+#HomeNewProjectBtn {
+    background-color: #238636;
+    color: #ffffff;
+    border: 1px solid #2ea043;
+    border-radius: 6px;
+    font-weight: bold;
+    font-size: 13px;
+}
+
+#HomeNewProjectBtn:hover {
+    background-color: #2ea043;
+}
+
+/* Project cards */
+#ProjectCard {
+    background-color: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+}
+
+#ProjectCard:hover {
+    background-color: #161b22;
+    border-color: #58a6ff;
+}
+
+#ProjectName {
+    color: #e6edf3;
+    font-size: 14px;
+}
+
+#ProjectPath {
+    color: #8b949e;
+    font-size: 11px;
+}
+
+#ProjectTime {
+    color: #484f58;
+    font-size: 11px;
+}
+
+#ProjectRemoveBtn {
+    background-color: transparent;
+    color: #484f58;
+    border: none;
+    border-radius: 4px;
+    font-size: 10px;
+}
+
+#ProjectRemoveBtn:hover {
+    background-color: #21262d;
+    color: #f85149;
+}
+
+/* ===========================================================================
+ * 5. SESSION VIEW & SPLITTER
+ * =========================================================================== */
+
+#SessionView {
+    background-color: #0d1117;
+}
+
+#ConversationPanel {
+    background-color: #0d1117;
+}
+
+#ReviewPanel {
+    background-color: #0d1117;
+    border-left: 1px solid #30363d;
+}
+
+QSplitter::handle {
+    background-color: #30363d;
+}
+
+QSplitter::handle:horizontal {
+    width: 1px;
+}
+
+QSplitter::handle:vertical {
+    height: 1px;
+}
+
+QSplitter::handle:hover {
+    background-color: #58a6ff;
+}
+
+/* Jump-to-latest floating button */
+#JumpToLatestBtn {
+    background-color: #21262d;
+    color: #58a6ff;
+    border: 1px solid #58a6ff;
+    border-radius: 18px;
+    font-size: 16px;
+    font-weight: bold;
+}
+
+#JumpToLatestBtn:hover {
+    background-color: #1f6feb;
+    color: #ffffff;
+}
+
+/* ===========================================================================
+ * 6. CHAT / MESSAGES
+ * =========================================================================== */
+
+#ChatScrollArea {
+    background-color: #0d1117;
+    border: none;
+}
+
+#MessageContainer {
+    background-color: #0d1117;
+}
+
+#InfoBar {
+    background-color: #161b22;
+    color: #8b949e;
+    border-bottom: 1px solid #30363d;
+    padding: 0 12px;
+    font-size: 12px;
+}
+
+#MessageRoleLabel {
+    background-color: transparent;
+    padding: 0 4px;
+}
+
+#MessageTimestampLabel {
+    color: #484f58;
+    background-color: transparent;
+}
+
+#MessageTextBrowser {
+    background-color: transparent;
+    color: #c9d1d9;
+    border: none;
+    padding: 0;
+    selection-background-color: #264f78;
+    selection-color: #c9d1d9;
+}
+
+#MessageAccentBar {
+    border-radius: 2px;
+}
+
+/* ===========================================================================
+ * 7. TOOL BLOCKS
+ * =========================================================================== */
+
+#ToolBlock {
+    background-color: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+}
+
+#ToolBlockHeader {
+    background-color: #161b22;
+    border: none;
+}
+
+#ToolBlockHeader:hover {
+    background-color: #1c2128;
+}
+
+#ToolName {
+    color: #58a6ff;
+    font-weight: bold;
+    background-color: transparent;
+}
+
+#ToolCommand {
+    color: #c9d1d9;
+    background-color: transparent;
+}
+
+#ToolTime {
+    color: #8b949e;
+    background-color: transparent;
+    font-family: "Consolas", "IBM Plex Mono", "Courier New", monospace;
+    font-size: 12px;
+}
+
+#ToolIndicator {
+    background-color: transparent;
+    font-size: 14px;
+}
+
+#ToolToggleButton {
+    background-color: transparent;
+    color: #8b949e;
+    border: none;
+    border-radius: 4px;
+    font-size: 10px;
+    padding: 2px;
+    min-width: 22px;
+    min-height: 22px;
+}
+
+#ToolToggleButton:hover {
+    background-color: #21262d;
+    color: #c9d1d9;
+}
+
+#ToolRetryButton {
+    background-color: transparent;
+    color: #f85149;
+    border: 1px solid #f85149;
+    border-radius: 4px;
+    font-size: 14px;
+    padding: 2px;
+    min-width: 22px;
+    min-height: 22px;
+}
+
+#ToolRetryButton:hover {
+    background-color: #f85149;
+    color: #ffffff;
+}
+
+#ToolSeparator {
+    background-color: #30363d;
+    border: none;
+}
+
+#ToolOutput {
+    background-color: #0d1117;
+    color: #c9d1d9;
+    border: none;
+    font-family: "Consolas", "IBM Plex Mono", "Courier New", monospace;
+    font-size: 13px;
+    selection-background-color: #264f78;
+}
+
+/* ===========================================================================
+ * 8. COMPOSER & INPUT
+ * =========================================================================== */
+
+#OpenCodeComposer {
+    background-color: #0d1117;
+    border-top: 1px solid #30363d;
+}
+
+#ComposerContextBar {
+    background-color: #0d1117;
+    border-bottom: 1px solid #21262d;
+}
+
+#ComposerModelLabel {
+    color: #58a6ff;
+    font-weight: bold;
+    font-size: 12px;
+    background-color: transparent;
+}
+
+#ComposerTokenLabel {
+    color: #8b949e;
+    font-size: 12px;
+    background-color: transparent;
+}
+
+#ComposerStepLabel {
+    color: #8b949e;
+    font-size: 12px;
+    background-color: transparent;
+}
+
+#ComposerToolbar {
+    background-color: #161b22;
+    border-bottom: 1px solid #30363d;
+}
+
+#ModelSelectButton {
+    background-color: #21262d;
+    color: #58a6ff;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 4px 12px;
+    font-size: 12px;
+    font-weight: bold;
+    text-align: left;
+}
+
+#ModelSelectButton:hover {
+    background-color: #30363d;
+    border-color: #58a6ff;
+}
+
+#AddMenuButton {
+    background-color: transparent;
+    color: #8b949e;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    font-size: 18px;
+    font-weight: bold;
+}
+
+#AddMenuButton:hover {
+    background-color: #21262d;
+    color: #c9d1d9;
+}
+
+#InputFrame {
+    background-color: #161b22;
+    border-left: 3px solid #58a6ff;
+    border-top: none;
+}
+
+#InputTextEdit {
+    background-color: transparent;
+    color: #c9d1d9;
+    border: none;
+    padding: 4px 0;
+    font-size: 14px;
+    selection-background-color: #264f78;
+}
+
+#InputTextEdit:focus {
+    border: none;
+}
+
+#ContextBar {
+    background-color: #0d1117;
+    border-top: 1px solid #21262d;
+    border-bottom: 1px solid #21262d;
+}
+
+#ContextModelLabel {
+    color: #58a6ff;
+    font-weight: bold;
+    font-size: 12px;
+    background-color: transparent;
+}
+
+#ContextTokenLabel {
+    color: #8b949e;
+    font-size: 12px;
+    background-color: transparent;
+}
+
+#ContextStepLabel {
+    color: #8b949e;
+    font-size: 12px;
+    background-color: transparent;
+}
+
+/* Submit button (green) */
+#SubmitButton,
+#ComposerSubmitBtn {
+    background-color: #238636;
+    color: #ffffff;
+    border: 1px solid #2ea043;
+    border-radius: 6px;
+    padding: 4px 12px;
+    font-weight: bold;
+    font-size: 13px;
+    min-height: 32px;
+    min-width: 56px;
+}
+
+#SubmitButton:hover,
+#ComposerSubmitBtn:hover {
+    background-color: #2ea043;
+}
+
+#SubmitButton:pressed,
+#ComposerSubmitBtn:pressed {
+    background-color: #196c2e;
+}
+
+#SubmitButton:disabled,
+#ComposerSubmitBtn:disabled {
+    background-color: #21262d;
+    color: #484f58;
+    border-color: #30363d;
+}
+
+/* Stop button (red) */
+#StopButton,
+#ComposerStopBtn {
+    background-color: #21262d;
+    color: #f85149;
+    border: 1px solid #f85149;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: bold;
+    min-width: 32px;
+    min-height: 32px;
+    padding: 2px;
+}
+
+#StopButton:hover,
+#ComposerStopBtn:hover {
+    background-color: #f85149;
+    color: #ffffff;
+}
+
+/* ===========================================================================
+ * 9. FILE TREE
+ * =========================================================================== */
+
+#FileTreeWidget {
+    background-color: #0d1117;
+}
+
+#FileTreeFilter {
+    margin: 8px;
+}
+
+#FileTreeView {
+    background-color: #0d1117;
+    color: #c9d1d9;
+    border: none;
+    font-size: 13px;
+    outline: none;
+}
+
+#FileTreeView::item {
+    padding: 2px 0;
+    min-height: 22px;
+}
+
+#FileTreeView::item:hover {
+    background-color: #161b22;
+}
+
+#FileTreeView::item:selected {
+    background-color: #1f6feb;
+    color: #ffffff;
+}
+
+#FileTreeView::branch:has-children:!has-siblings:closed,
+#FileTreeView::branch:closed:has-children:has-siblings {
+    border-image: none;
+}
+
+#FileTreeView::branch:open:has-children:!has-siblings,
+#FileTreeView::branch:open:has-children:has-siblings {
+    border-image: none;
+}
+
+/* ===========================================================================
+ * 10. DIFF VIEW
+ * =========================================================================== */
+
+#DiffViewWidget {
+    background-color: #0d1117;
+}
+
+#DiffTabBar {
+    background-color: #161b22;
+    border-bottom: 1px solid #30363d;
+}
+
+#DiffTabBar::tab {
+    background-color: #161b22;
+    color: #8b949e;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 6px 14px;
+    font-size: 12px;
+    min-height: 28px;
+}
+
+#DiffTabBar::tab:hover {
+    background-color: #21262d;
+    color: #c9d1d9;
+}
+
+#DiffTabBar::tab:selected {
+    color: #e6edf3;
+    border-bottom: 2px solid #58a6ff;
+}
+
+#DiffContent {
+    background-color: #0d1117;
+    border: none;
+    font-family: "Consolas", "IBM Plex Mono", monospace;
+    font-size: 13px;
+}
+
+#DiffEmptyLabel {
+    color: #484f58;
+    font-size: 14px;
+    padding: 40px;
+}
+
+/* ===========================================================================
+ * 11. DIALOGS
+ * =========================================================================== */
+
+/* Base dialog */
+#OpenCodeDialog {
+    background-color: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 10px;
+}
+
+#DialogTitleBar {
+    background-color: #0d1117;
+    border-bottom: 1px solid #30363d;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+}
+
+#DialogTitle {
+    color: #e6edf3;
+    font-weight: bold;
+    font-size: 14px;
+}
+
+#DialogCloseButton {
+    background-color: transparent;
+    color: #8b949e;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+#DialogCloseButton:hover {
+    background-color: #21262d;
+    color: #f85149;
+}
+
+#DialogContent {
+    background-color: #161b22;
+    border-bottom-left-radius: 10px;
+    border-bottom-right-radius: 10px;
+}
+
+/* Permission prompt */
+#PermissionPrompt {
+    background-color: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 10px;
+}
+
+#PermToolName {
+    color: #e6edf3;
+    font-size: 16px;
+}
+
+#PermCommand {
+    color: #c9d1d9;
+    background-color: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    padding: 8px;
+    font-family: "Consolas", monospace;
+}
+
+#PermDescription {
+    color: #8b949e;
+    font-size: 13px;
+}
+
+#PermAlwaysCheck {
+    color: #8b949e;
+    font-size: 12px;
+}
+
+#PermApproveButton {
+    background-color: #238636;
+    color: #ffffff;
+    border: 1px solid #2ea043;
+    border-radius: 6px;
+    font-weight: bold;
+    font-size: 13px;
+    min-height: 36px;
+}
+
+#PermApproveButton:hover {
+    background-color: #2ea043;
+}
+
+#PermDenyButton {
+    background-color: #21262d;
+    color: #f85149;
+    border: 1px solid #f85149;
+    border-radius: 6px;
+    font-size: 13px;
+    min-height: 36px;
+}
+
+#PermDenyButton:hover {
+    background-color: #f85149;
+    color: #ffffff;
+}
+
+/* Command palette */
+#CommandPalette {
+    background-color: #161b22;
+}
+
+#CommandPaletteSearch {
+    font-size: 16px;
+    min-height: 40px;
+    padding: 8px 16px;
+}
+
+#CommandPaletteList {
+    background-color: #161b22;
+    color: #c9d1d9;
+    border: none;
+    font-size: 14px;
+    outline: none;
+}
+
+#CommandPaletteList::item {
+    padding: 8px 16px;
+    min-height: 32px;
+}
+
+#CommandPaletteList::item:hover {
+    background-color: #21262d;
+}
+
+#CommandPaletteList::item:selected {
+    background-color: #1f6feb;
+    color: #ffffff;
+}
+
+/* Model picker */
+#ModelPicker {
+    background-color: #161b22;
+}
+
+#ModelPickerSearch {
+    font-size: 15px;
+    min-height: 38px;
+}
+
+#ModelPickerList {
+    background-color: #161b22;
+    color: #c9d1d9;
+    border: none;
+    font-size: 14px;
+    outline: none;
+}
+
+#ModelPickerList::item {
+    padding: 10px 16px;
+    min-height: 36px;
+}
+
+#ModelPickerList::item:hover {
+    background-color: #21262d;
+}
+
+#ModelPickerList::item:selected {
+    background-color: #1f6feb;
+    color: #ffffff;
+}
+
+/* Provider connect dialog */
+#ProviderConnectDialog {
+    background-color: #161b22;
+}
+
+#ProvConnectName {
+    color: #e6edf3;
+    font-size: 16px;
+}
+
+#ProvApiKey,
+#ProvBaseUrl {
+    min-height: 36px;
+}
+
+#ProvApiType {
+    min-height: 36px;
+}
+
+#ProvConnectBtn {
+    background-color: #238636;
+    color: #ffffff;
+    border: 1px solid #2ea043;
+    border-radius: 6px;
+    font-weight: bold;
+    min-height: 36px;
+}
+
+#ProvConnectBtn:hover {
+    background-color: #2ea043;
+}
+
+#ProvCancelBtn {
+    background-color: #21262d;
+    color: #c9d1d9;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    min-height: 36px;
+}
+
+#ProvCancelBtn:hover {
+    background-color: #30363d;
+}
+
+/* Settings dialog */
+#SettingsDialog {
+    background-color: #161b22;
+}
+
+#SettingsTabWidget {
+    background-color: #161b22;
+}
+
+#SettingsTabWidget::pane {
+    background-color: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+}
+
+#SettingsTabWidget::tab-bar {
+    left: 4px;
+}
+
+#SettingsTabWidget QTabBar::tab {
+    padding: 8px 20px;
+    font-size: 13px;
+}
+
+#SettingsGroup {
+    border-radius: 6px;
+    padding: 16px;
+}
+
+#SettingsInfoLabel {
+    color: #8b949e;
+    font-size: 13px;
+}
+
+#SettingsBtnBar {
+    background-color: #0d1117;
+    border-top: 1px solid #30363d;
+}
+
+#SettingsApplyBtn {
+    background-color: #238636;
+    color: #ffffff;
+    border: 1px solid #2ea043;
+    border-radius: 6px;
+    font-weight: bold;
+    font-size: 13px;
+    min-height: 36px;
+    min-width: 80px;
+}
+
+#SettingsApplyBtn:hover {
+    background-color: #2ea043;
+}
+
+#SettingsCancelBtn {
+    background-color: #21262d;
+    color: #c9d1d9;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    font-size: 13px;
+    min-height: 36px;
+    min-width: 80px;
+}
+
+#SettingsCancelBtn:hover {
+    background-color: #30363d;
+}
+
+#AddProviderBtn {
+    background-color: #238636;
+    color: #ffffff;
+    border: 1px solid #2ea043;
+    border-radius: 6px;
+    font-weight: bold;
+    font-size: 13px;
+}
+
+#AddProviderBtn:hover {
+    background-color: #2ea043;
+}
+
+#RemoveProviderBtn {
+    background-color: #21262d;
+    color: #f85149;
+    border: 1px solid #f85149;
+    border-radius: 6px;
+    font-size: 13px;
+}
+
+#RemoveProviderBtn:hover {
+    background-color: #f85149;
+    color: #ffffff;
+}
+
+/* ===========================================================================
+ * 12. BUTTONS — General purpose
+ * =========================================================================== */
+
+QPushButton {
+    background-color: #21262d;
+    color: #c9d1d9;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 6px 16px;
+    font-size: 13px;
+    min-height: 32px;
+}
+
+QPushButton:hover {
+    background-color: #30363d;
+}
+
+QPushButton:pressed {
+    background-color: #0d1117;
+}
+
+QPushButton:disabled {
+    background-color: #161b22;
+    color: #484f58;
+    border-color: #21262d;
+}
+
+QPushButton:focus {
+    border-color: #58a6ff;
+}
+
+QPushButton:flat {
+    background-color: transparent;
+    border: none;
+}
+
+QPushButton:flat:hover {
+    background-color: #21262d;
+}
+
+/* ===========================================================================
+ * 13. SCROLLBARS — Thin, minimal
+ * =========================================================================== */
+
+QScrollArea {
+    background-color: transparent;
+    border: none;
+}
+
+QScrollBar:vertical {
+    background-color: transparent;
+    width: 8px;
+    margin: 0;
+}
+
+QScrollBar::handle:vertical {
+    background-color: #30363d;
+    min-height: 40px;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background-color: #484f58;
+}
+
+QScrollBar::handle:vertical:pressed {
+    background-color: #58a6ff;
+}
+
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical {
+    height: 0;
+    background: none;
+}
+
+QScrollBar::add-page:vertical,
+QScrollBar::sub-page:vertical {
+    background: none;
+}
+
+QScrollBar:horizontal {
+    background-color: transparent;
+    height: 8px;
+    margin: 0;
+}
+
+QScrollBar::handle:horizontal {
+    background-color: #30363d;
+    min-width: 40px;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background-color: #484f58;
+}
+
+QScrollBar::add-line:horizontal,
+QScrollBar::sub-line:horizontal {
+    width: 0;
+    background: none;
+}
+
+/* ===========================================================================
+ * 14. STATUS BAR & TOOLTIPS
+ * =========================================================================== */
+
+QStatusBar {
+    background-color: #161b22;
+    color: #8b949e;
+    border-top: 1px solid #30363d;
+    font-size: 12px;
+    padding: 2px 8px;
+}
+
+QToolTip {
+    background-color: #21262d;
+    color: #c9d1d9;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 12px;
+}
+
+/* ===========================================================================
+ * 15. TABLES & LISTS
+ * =========================================================================== */
+
+QTableWidget {
+    background-color: #0d1117;
+    color: #c9d1d9;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    gridline-color: #21262d;
+    font-size: 13px;
+}
+
+QTableWidget::item {
+    padding: 6px 12px;
+    min-height: 28px;
+}
+
+QTableWidget::item:hover {
+    background-color: #161b22;
+}
+
+QTableWidget::item:selected {
+    background-color: #1f6feb;
+    color: #ffffff;
+}
+
+QHeaderView::section {
+    background-color: #161b22;
+    color: #8b949e;
+    border: none;
+    border-bottom: 1px solid #30363d;
+    padding: 6px 12px;
+    font-weight: bold;
+    font-size: 12px;
+}
+
+QListWidget {
+    background-color: #0d1117;
+    color: #c9d1d9;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    font-size: 13px;
+    outline: none;
+}
+
+QListWidget::item {
+    padding: 8px 12px;
+    min-height: 32px;
+}
+
+QListWidget::item:hover {
+    background-color: #161b22;
+}
+
+QListWidget::item:selected {
+    background-color: #1f6feb;
+    color: #ffffff;
+}
+
+/* ===========================================================================
+ * 16. TEXT SELECTION
+ * =========================================================================== */
+
+*::selection {
+    background-color: #264f78;
+    color: #c9d1d9;
+}
+
+/* ===========================================================================
+ * 17. RESPONSIVE BREAKPOINTS
+ * For 1280x720 and 800x480 targets.
+ * Touch-safe: minimum 32px tap targets everywhere.
+ * =========================================================================== */
+
+@media (max-width: 800px) {
+    QPushButton {
+        min-height: 40px;
+        padding: 8px 16px;
+        font-size: 14px;
+    }
+
+    #SubmitButton,
+    #ComposerSubmitBtn {
+        min-height: 40px;
+        min-width: 64px;
+    }
+
+    #StopButton,
+    #ComposerStopBtn {
+        min-width: 40px;
+        min-height: 40px;
+    }
+
+    #ToolToggleButton,
+    #ToolRetryButton {
+        min-width: 32px;
+        min-height: 32px;
+    }
+
+    QTabBar::tab {
+        min-height: 44px;
+        padding: 10px 16px;
+    }
+
+    #JumpToLatestBtn {
+        min-width: 44px;
+        min-height: 44px;
+    }
+}

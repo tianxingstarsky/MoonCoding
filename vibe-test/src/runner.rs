@@ -11,7 +11,7 @@ use crate::llm::{LlmClient, Message, ToolCall, ToolDef, StreamEvent};
 use crate::session::{self, Session};
 use crate::tools;
 
-const TOOL_OUTPUT_MAX_CHARS: usize = 4000; // 截断 LLM 看到的工具输出 (≈ opencode 2K chars ×2)
+const TOOL_OUTPUT_MAX_CHARS: usize = 16000; // 截断 LLM 看到的工具输出（非 create 输入上限）
 const PRUNE_START_STEP: usize = 12;         // 从第 N 步开始删除旧 messages
 const PRUNE_KEEP_RECENT: usize = 6;          // 保留最近 N 个 assistant+tool 对
 

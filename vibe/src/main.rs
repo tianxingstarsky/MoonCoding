@@ -7,7 +7,7 @@ mod split;
 use format::{new_ulid, BlockSet, Fileset, Index, Block, Tail, DeletedBlock, LineMap, sha256_hex};
 use std::fs;
 use std::io::{self, Read};
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::process::exit;
 
 fn main() {
@@ -36,7 +36,7 @@ fn main() {
 fn usage() {
     eprintln!("vibe (block-set protocol) - commands:");
     eprintln!("  vibe new <path> --name <n> --lang <l> --purpose <p>");
-    eprintln!("  vibe split <src.py> [--purpose <p>]            split existing file into blockset");
+    eprintln!("  vibe split <source> [--lang python|rust|cpp] [--purpose <p>]");
     eprintln!("  vibe info <path|ulid>                          technical structural dump (#CX view)");
     eprintln!("  vibe overview <path>                          AI-facing file summary");
     eprintln!("  vibe peek <path> <seq>                         AI-facing one-block narrative (tail.purpose)");
@@ -67,14 +67,66 @@ fn root() -> PathBuf { PathBuf::from(".") }
 /// Windows 反斜杠 -> POSIX 斜杠, 内部统一用相对 POSIX 路径
 fn to_posix(p: &str) -> String { p.replace('\\', "/") }
 
-/// CLI: 支持 <path> 或 <ulid>; 优先按 path 在 .vibe 索引里查, 找不到按 ulid 直接 load
+fn workspace_path(input: &str) -> Result<PathBuf, String> {
+    let portable = input.trim().replace('\\', "/");
+    if portable.is_empty() {
+        return Err("path must not be empty".to_string());
+    }
+    let path = Path::new(&portable);
+    if path.is_absolute() {
+        return Err(format!("path must be workspace-relative: {input}"));
+    }
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(value) => normalized.push(value),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(format!("path escapes workspace: {input}"));
+            }
+        }
+    }
+    if normalized.as_os_str().is_empty() {
+        return Err("path must identify a file".to_string());
+    }
+    Ok(normalized)
+}
+
+/// CLI: 支持 <path> 或 <ulid>; 优先按 path 在 .vibe 索引里查。
+/// 找不到时：仅当参数像 ULID 才按 ulid 加载，否则给出可执行的 split/new 提示。
 fn bs_load(arg: &str) -> BlockSet {
     let posix = to_posix(arg);
-    if let Some(bs) = BlockSet::load_by_path(&root(), &posix).unwrap_or_else(|e| die(format!("load: {e}"))) {
-        return bs;
+    match BlockSet::load_by_path(&root(), &posix) {
+        Ok(Some(bs)) => return bs,
+        Ok(None) => {}
+        Err(e) => die(format!("load by path `{posix}`: {}", io_en(&e))),
     }
-    // 视作 ulid 直接 load
-    BlockSet::load(&root(), arg).unwrap_or_else(|e| die(format!("load ulid: {e}")))
+    if looks_like_ulid(arg) {
+        return BlockSet::load(&root(), arg).unwrap_or_else(|e| {
+            die(format!("no blockset for ulid `{arg}`: {}", io_en(&e)))
+        });
+    }
+    die(format!(
+        "no blockset for path `{posix}`.\n\
+         Create one first, then retry:\n\
+           vibe split {posix} --purpose \"<why this file exists>\"\n\
+           vibe new {posix} --name <n> --lang <python|rust|cpp> --purpose \"<why>\""
+    ))
+}
+
+fn looks_like_ulid(s: &str) -> bool {
+    let s = s.trim();
+    s.len() == 26
+        && s.chars()
+            .all(|c| matches!(c, '0'..='9' | 'A'..='Z' | 'a'..='z'))
+}
+
+/// Prefer stable English io errors so tool output is not locale-garbled in UI/logs.
+fn io_en(e: &io::Error) -> String {
+    match e.raw_os_error() {
+        Some(code) => format!("{} (os error {code})", e.kind()),
+        None => format!("{}", e.kind()),
+    }
 }
 
 /// 解析 stdin JSON (整个 body 当 JSON)
@@ -130,15 +182,27 @@ fn cmd_new(args: &[String]) {
     let mut path = String::new(); let mut name = String::new(); let mut lang = String::new(); let mut purpose = String::new();
     let mut i = 0; while i < args.len() {
         match args[i].as_str() {
-            "--name" => { name = args[i+1].clone(); i += 2; }
-            "--lang" => { lang = args[i+1].clone(); i += 2; }
-            "--purpose" => { purpose = args[i+1].clone(); i += 2; }
+            "--name" => {
+                name = args.get(i + 1).cloned().unwrap_or_else(|| die("new: --name requires a value"));
+                i += 2;
+            }
+            "--lang" => {
+                lang = args.get(i + 1).cloned().unwrap_or_else(|| die("new: --lang requires a value"));
+                i += 2;
+            }
+            "--purpose" => {
+                purpose = args.get(i + 1).cloned().unwrap_or_else(|| die("new: --purpose requires a value"));
+                i += 2;
+            }
             _ if path.is_empty() => { path = args[i].clone(); i += 1; }
             _ => die("unknown arg"),
         }
     }
-    if path.is_empty() || name.is_empty() || lang.is_empty() || purpose.is_empty() { die("new: <path> --name --lang --purpose all required"); }
-    let posix = to_posix(&path);
+    if path.is_empty() || name.trim().is_empty() || lang.trim().is_empty() || purpose.trim().is_empty() {
+        die("new: <path> --name --lang --purpose all required and non-empty");
+    }
+    let normalized_path = workspace_path(&path).unwrap_or_else(|error| die(error));
+    let posix = to_posix(&normalized_path.to_string_lossy());
     if BlockSet::load_by_path(&root(), &posix).unwrap_or(None).is_some() { die(format!("fileset for {} already exists", posix)); }
     let ulid = new_ulid();
     let dir = BlockSet::dir_of(&root(), &ulid);
@@ -153,21 +217,41 @@ fn cmd_new(args: &[String]) {
 
 fn cmd_split(args: &[String]) {
     if args.is_empty() { usage(); exit(2); }
-    let src_path = PathBuf::from(&args[0]);
+    let src_path = workspace_path(&args[0]).unwrap_or_else(|error| die(error));
     let mut purpose = String::new();
+    let mut explicit_language: Option<String> = None;
     let mut i = 1; while i < args.len() {
         match args[i].as_str() {
-            "--purpose" => { purpose = args[i+1].clone(); i += 2; }
+            "--purpose" => {
+                let Some(value) = args.get(i + 1) else { die("split: --purpose requires a value"); };
+                purpose = value.clone();
+                i += 2;
+            }
+            "--lang" => {
+                let Some(value) = args.get(i + 1) else { die("split: --lang requires a value"); };
+                explicit_language = Some(value.clone());
+                i += 2;
+            }
             _ => die("split: unknown arg"),
         }
     }
     let src = fs::read(&src_path).unwrap_or_else(|e| die(format!("read: {e}")));
+    if purpose.trim().is_empty() {
+        die("split: non-empty --purpose is required");
+    }
     let posix = to_posix(&src_path.to_string_lossy());
-    let name = src_path.file_name().unwrap().to_string_lossy().to_string();
+    let name = src_path
+        .file_name()
+        .unwrap_or_else(|| die("split: source path has no file name"))
+        .to_string_lossy()
+        .to_string();
     if BlockSet::load_by_path(&root(), &posix).unwrap_or(None).is_some() {
         die(format!("fileset for {} already exists; drop it first", posix));
     }
-    let bs = split::split_python(&src, &root(), &posix, &name, &purpose);
+    let language = split::SourceLanguage::detect(&src_path, explicit_language.as_deref())
+        .unwrap_or_else(|error| die(error));
+    let bs = split::split_source(&src, &root(), &posix, &name, &purpose, language)
+        .unwrap_or_else(|error| die(error));
     bs.save().unwrap_or_else(|e| die(format!("save: {e}")));
     println!("split: {} -> .vibe/{}.vibe/ ({} blocks, rev {})",
         posix, bs.index.fileset.ulid, bs.index.blocks.len(), bs.index.rev);
@@ -207,7 +291,8 @@ fn cmd_overview(args: &[String]) {
     let mut bs = bs_load(&args[0]);
     bs.recount_lines();
     let f = &bs.index.fileset;
-    println!("file: {}", f.name);
+    println!("file: {}", f.path);
+    println!("name: {}", f.name);
     println!("purpose: {}", f.purpose);
     println!("rev: {}", bs.index.rev);
     println!("(assembled: {}; 行号以最近 assemble 后为准)", if f.source_sha256.is_empty() {"未 assemble"} else {"已 assemble"});
@@ -259,11 +344,23 @@ fn cmd_meta(args: &[String]) {
     let mut i = 1; let mut new_purpose: Option<String> = None;
     while i < args.len() {
         match args[i].as_str() {
-            "--purpose" => { new_purpose = Some(args[i+1].clone()); i += 2; }
+            "--purpose" => {
+                new_purpose = Some(
+                    args.get(i + 1)
+                        .cloned()
+                        .unwrap_or_else(|| die("meta: --purpose requires a value")),
+                );
+                i += 2;
+            }
             _ => die("meta: only --purpose supported"),
         }
     }
-    if let Some(p) = new_purpose { bs.index.fileset.purpose = p; }
+    if let Some(p) = new_purpose {
+        if p.trim().is_empty() {
+            die("meta: --purpose must not be empty");
+        }
+        bs.index.fileset.purpose = p;
+    }
     bs.index.rev += 1;
     bs.save().unwrap_or_else(|e| die(format!("save: {e}")));
     println!("{{\"ok\":true,\"new_rev\":{}}}", bs.index.rev);
@@ -292,7 +389,14 @@ fn cmd_insert(args: &[String]) {
     bs.index.blocks.insert(insert_pos, Block {
         ulid: new_ulid_str.clone(), seq: 0, byte_offset: 0, byte_length: 0,
         line_start: 0, line_end: 0, tail,
-        symbols: split::extract_symbols(&code),
+        symbols: split::extract_symbols(
+            &code,
+            split::SourceLanguage::detect(
+                Path::new(&bs.index.fileset.path),
+                Some(&bs.index.fileset.lang),
+            )
+            .unwrap_or_else(|error| die(error)),
+        ),
     });
     datas.insert(insert_pos, code);
     bs.repack(datas);
@@ -300,7 +404,13 @@ fn cmd_insert(args: &[String]) {
     bs.save().unwrap_or_else(|e| die(format!("save: {e}")));
     print_remap(&bs);
     if let Some((sim, warn)) = embed_check(&bs) { eprintln!("{}  (cos={:.3})", warn, sim); }
-    println!("{{\"ok\":true,\"new_rev\":{},\"new_seq\":{},\"binding\":\"{}\"}}", bs.index.rev, insert_pos + 1, new_ulid_str);
+    let new_seq = insert_pos + 1;
+    let (line_start, line_end, summary) = locked_block_span(&mut bs, new_seq);
+    println!(
+        "{{\"ok\":true,\"new_rev\":{},\"new_seq\":{},\"binding\":\"{}\",\"lines\":{{\"start\":{},\"end\":{}}},\"summary\":{}}}",
+        bs.index.rev, new_seq, new_ulid_str, line_start, line_end, json_str(&summary)
+    );
+    eprintln!("locked lines {}-{}  (seq={} \"{}\")", line_start, line_end, new_seq, summary);
 }
 
 fn cmd_replace(args: &[String]) {
@@ -319,7 +429,14 @@ fn cmd_replace(args: &[String]) {
     let ulid_kept = bs.index.blocks[pos].ulid.clone();
     let old_snap = deps::snapshot(&bs);
     bs.index.blocks[pos].tail = tail;
-    let new_symbols = split::extract_symbols(&code);
+    let new_symbols = split::extract_symbols(
+        &code,
+        split::SourceLanguage::detect(
+            Path::new(&bs.index.fileset.path),
+            Some(&bs.index.fileset.lang),
+        )
+        .unwrap_or_else(|error| die(error)),
+    );
     bs.index.blocks[pos].symbols = new_symbols;
     let mut datas: Vec<Vec<u8>> = bs.index.blocks.iter().map(|b| bs.block_bytes(b).to_vec()).collect();
     datas[pos] = code;
@@ -331,7 +448,14 @@ fn cmd_replace(args: &[String]) {
     bs.save().unwrap_or_else(|e| die(format!("save: {e}")));
     print_remap(&bs);
     if let Some((sim, warn)) = embed_check(&bs) { eprintln!("{}  (cos={:.3})", warn, sim); }
-    println!("{{\"ok\":true,\"new_rev\":{},\"seq\":{},\"binding\":\"{}\"}}", bs.index.rev, seq, ulid_kept);
+    // After repack, seq is renumbered to 1-based index; keep caller's seq if still present.
+    let report_seq = bs.index.blocks.iter().find(|b| b.ulid == ulid_kept).map(|b| b.seq).unwrap_or(seq);
+    let (line_start, line_end, summary) = locked_block_span(&mut bs, report_seq);
+    println!(
+        "{{\"ok\":true,\"new_rev\":{},\"seq\":{},\"binding\":\"{}\",\"lines\":{{\"start\":{},\"end\":{}}},\"summary\":{}}}",
+        bs.index.rev, report_seq, ulid_kept, line_start, line_end, json_str(&summary)
+    );
+    eprintln!("locked lines {}-{}  (seq={} \"{}\")", line_start, line_end, report_seq, summary);
 }
 
 fn cmd_drop(args: &[String]) {
@@ -347,12 +471,14 @@ fn cmd_drop(args: &[String]) {
     let pos = bs.index.blocks.iter().position(|b| b.seq == seq).unwrap_or_else(|| die(format!("seq {} not found", seq)));
     let dropped_defines = bs.index.blocks[pos].symbols.defines.clone();
     let dropped = bs.index.blocks.remove(pos);
+    let dropped_seq = dropped.seq;
+    let dropped_ulid = dropped.ulid.clone();
+    let dropped_summary = dropped.tail.summary.clone();
     bs.index.deleted.push(DeletedBlock {
         ulid: dropped.ulid.clone(), seq_was: dropped.seq,
         tail: dropped.tail.clone(), deleted_at_rev: bs.index.rev + 1,
         byte_length: dropped.byte_length,
     });
-    let _ = dropped;
     let mut datas: Vec<Vec<u8>> = Vec::with_capacity(bs.index.blocks.len());
     for b in &bs.index.blocks { datas.push(bs.block_bytes(b).to_vec()); }
     bs.repack(datas);
@@ -363,8 +489,39 @@ fn cmd_drop(args: &[String]) {
     bs.save().unwrap_or_else(|e| die(format!("save: {e}")));
     print_remap(&bs);
     if let Some((sim, warn)) = embed_check(&bs) { eprintln!("{}  (cos={:.3})", warn, sim); }
-    println!("{{\"ok\":true,\"new_rev\":{},\"dropped_seq_was\":{},\"binding\":\"{}\"}}",
-        bs.index.rev, dropped.seq, dropped.ulid);
+    bs.recount_lines();
+    println!(
+        "{{\"ok\":true,\"new_rev\":{},\"dropped_seq_was\":{},\"binding\":\"{}\",\"lines\":{{\"start\":0,\"end\":0}},\"summary\":{}}}",
+        bs.index.rev, dropped_seq, dropped_ulid, json_str(&dropped_summary)
+    );
+    eprintln!("dropped seq_was={} \"{}\" (block removed; remaining blocks remapped)", dropped_seq, dropped_summary);
+}
+
+/// Line span of the locked (edited) block after recount_lines.
+fn locked_block_span(bs: &mut BlockSet, seq: usize) -> (usize, usize, String) {
+    bs.recount_lines();
+    if let Some(b) = bs.index.blocks.iter().find(|b| b.seq == seq) {
+        (b.line_start, b.line_end, b.tail.summary.clone())
+    } else {
+        (0, 0, String::new())
+    }
+}
+
+fn json_str(s: &str) -> String {
+    let mut out = String::from("\"");
+    for ch in s.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 /// 在写命令回执中打印旧 seq -> 新 seq 的重编号映射 (drop/insert 后)
@@ -380,8 +537,24 @@ fn cmd_assemble(args: &[String]) {
     if args.is_empty() { usage(); exit(2); }
     let mut bs = bs_load(&args[0]);
     bs.recount_lines();
-    let out_path = if args.len() >= 3 && args[1] == "-o" { PathBuf::from(&args[2]) }
-        else { PathBuf::from(&bs.index.fileset.path) };
+    let output_arg = if args.len() >= 3 && args[1] == "-o" {
+        args[2].as_str()
+    } else {
+        bs.index.fileset.path.as_str()
+    };
+    let out_path = workspace_path(output_arg).unwrap_or_else(|error| die(error));
+    // Refuse wiping a real file with an empty blockset (calculator ui.json footgun).
+    if bs.code.is_empty() && bs.index.blocks.is_empty() {
+        let disk_len = std::fs::metadata(&out_path).map(|m| m.len()).unwrap_or(0);
+        if disk_len > 0 {
+            die(format!(
+                "assemble refused: blockset for `{}` has 0 blocks/0 bytes but `{}` already has {disk_len} B on disk. \
+                 Refusing to overwrite with empty projection. Delete this blockset or insert/split real content first.",
+                bs.index.fileset.path,
+                out_path.display()
+            ));
+        }
+    }
     if let Err(e) = assemble::assemble_to(&mut bs, &out_path) { die(format!("assemble: {e}")); }
     bs.index.rev += 1;
     // 自增 rev 后, 写 line-map (它记录 assemble 后的 source 行 -> seq, 用当前 rev)
@@ -406,7 +579,10 @@ fn cmd_verify(args: &[String]) {
     if bs.index.fileset.source_sha256.is_empty() {
         eprintln!("(no source_sha256 on record; this blockset has never been assembled)");
     } else if cur_sha != bs.index.fileset.source_sha256 {
-        eprintln!("INTERNAL FAIL: assembled sha {} != recorded {}", cur_sha, bs.index.fileset.source_sha256);
+        die(format!(
+            "INTERNAL FAIL: assembled sha {} != recorded {}",
+            cur_sha, bs.index.fileset.source_sha256
+        ));
     }
     // 与 assemble 输出文件 / 指定 original 比对
     let target = if args.len() >= 2 { PathBuf::from(&args[1]) } else { PathBuf::from(&bs.index.fileset.path) };
@@ -478,6 +654,7 @@ fn cmd_deps(args: &[String]) {
     println!("file: {}", bs.index.fileset.path);
     println!("purpose: {}", bs.index.fileset.purpose);
     println!("rev: {}", bs.index.rev);
+    println!("analysis: heuristic lexical symbol graph (not scope-resolved)");
     println!("blocks: {}", bs.index.blocks.len());
     println!("fileset_defines: {}", fs_defines.iter().cloned().collect::<Vec<_>>().join(", "));
     println!();
@@ -504,5 +681,24 @@ fn cmd_deps(args: &[String]) {
             println!("  depends_on  : seqs {:?}", dep_seqs);
         }
         println!();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::workspace_path;
+    use std::path::PathBuf;
+
+    #[test]
+    fn workspace_paths_are_lexically_confined() -> Result<(), String> {
+        assert_eq!(
+            workspace_path("./src/main.rs")?,
+            PathBuf::from("src").join("main.rs")
+        );
+        assert!(workspace_path("../outside.rs").is_err());
+        assert!(workspace_path("/tmp/outside.rs").is_err());
+        #[cfg(windows)]
+        assert!(workspace_path("C:\\outside.rs").is_err());
+        Ok(())
     }
 }
