@@ -66,6 +66,7 @@ private:
     bool adoptRunningLease();
     void killLeasePidIfAny();
     void injectApiBase();
+    QByteArray apiBaseInjectSnippet() const;
     quint16 backendPort() const;
     QString backendApiBase() const;
     QString backendScriptPath() const;

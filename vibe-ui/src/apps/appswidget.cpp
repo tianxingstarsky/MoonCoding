@@ -4,6 +4,8 @@
 
 #ifdef HAS_QT_WEBENGINE
 #include <QWebEnginePage>
+#include <QWebEngineScript>
+#include <QWebEngineScriptCollection>
 #include <QWebEngineSettings>
 #include <QWebEngineView>
 #endif
@@ -339,6 +341,15 @@ void AppsWidget::writeBackendLease(qint64 pid, quint16 port)
     if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         f.write(QJsonDocument(obj).toJson(QJsonDocument::Indented));
     }
+    // Optional script include for pages that load .mooncoding/api.js explicitly.
+    QFile apiJs(QDir(m_workspace).filePath(QStringLiteral(".mooncoding/api.js")));
+    if (apiJs.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        apiJs.write(QByteArrayLiteral("window.__MOONCODING_API_BASE__='")
+                    + backendApiBase().toUtf8()
+                    + QByteArrayLiteral("';\nwindow.__MOONCODING_BACKEND_PORT__=")
+                    + QByteArray::number(port)
+                    + QByteArrayLiteral(";\n"));
+    }
 }
 
 void AppsWidget::clearBackendLease()
@@ -347,6 +358,7 @@ void AppsWidget::clearBackendLease()
         return;
     }
     QFile::remove(backendLeasePath());
+    QFile::remove(QDir(m_workspace).filePath(QStringLiteral(".mooncoding/api.js")));
 }
 
 bool AppsWidget::adoptRunningLease()
@@ -409,6 +421,19 @@ void AppsWidget::killLeasePidIfAny()
 #endif
 }
 
+QByteArray AppsWidget::apiBaseInjectSnippet() const
+{
+    if (!hasBackendScript() || backendPort() == 0) {
+        return {};
+    }
+    const QByteArray api = backendApiBase().toUtf8();
+    return QByteArrayLiteral("<script>window.__MOONCODING_API_BASE__='")
+        + api
+        + QByteArrayLiteral("';window.__MOONCODING_BACKEND_PORT__=")
+        + QByteArray::number(backendPort())
+        + QByteArrayLiteral(";</script>");
+}
+
 void AppsWidget::injectApiBase()
 {
     if (!hasBackendScript()) {
@@ -424,12 +449,28 @@ void AppsWidget::injectApiBase()
     }
     const QString safeApi = QString(api).replace(QLatin1Char('\\'), QLatin1String("\\\\"))
                                 .replace(QLatin1Char('\''), QLatin1String("\\'"));
-    const QString script = QStringLiteral(
+    const QString source = QStringLiteral(
                                "window.__MOONCODING_API_BASE__='%1';"
                                "window.__MOONCODING_BACKEND_PORT__=%2;")
                                .arg(safeApi)
                                .arg(backendPort());
-    m_webView->page()->runJavaScript(script);
+
+    // DocumentCreation runs before page <script> tags (app.js) — critical for board WebEngine.
+    QWebEngineScriptCollection &scripts = m_webView->page()->scripts();
+    const QList<QWebEngineScript> old = scripts.find(QStringLiteral("mooncoding-api-base"));
+    for (const QWebEngineScript &s : old) {
+        scripts.remove(s);
+    }
+    QWebEngineScript boot;
+    boot.setName(QStringLiteral("mooncoding-api-base"));
+    boot.setSourceCode(source);
+    boot.setInjectionPoint(QWebEngineScript::DocumentCreation);
+    boot.setWorldId(QWebEngineScript::MainWorld);
+    boot.setRunsOnSubFrames(false);
+    scripts.insert(boot);
+
+    // Also patch an already-loaded document (reload / late start).
+    m_webView->page()->runJavaScript(source);
 #else
     Q_UNUSED(api);
 #endif
@@ -489,23 +530,16 @@ void AppsWidget::loadIndexHtml()
 
     // Auto-start before loading so the page can fetch immediately.
     ensureBackendRunning();
+    injectApiBase();
 
-#ifdef HAS_QT_WEBENGINE
-    m_webView->setUrl(QUrl::fromLocalFile(indexPath));
-#else
     QFile f(indexPath);
     if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
         m_status->setText(tr("无法读取 index.html · %1").arg(previewModeLabel()));
         return;
     }
     QByteArray html = f.readAll();
-    if (hasBackendScript()) {
-        const QByteArray inject =
-            QByteArrayLiteral("<script>window.__MOONCODING_API_BASE__='")
-            + backendApiBase().toUtf8()
-            + QByteArrayLiteral("';window.__MOONCODING_BACKEND_PORT__=")
-            + QByteArray::number(backendPort())
-            + QByteArrayLiteral(";</script>");
+    const QByteArray inject = apiBaseInjectSnippet();
+    if (!inject.isEmpty()) {
         const int head = html.indexOf("<head>");
         if (head >= 0) {
             html.insert(head + 6, inject);
@@ -514,6 +548,10 @@ void AppsWidget::loadIndexHtml()
         }
     }
     const QUrl base = QUrl::fromLocalFile(QDir(m_workspace).absolutePath() + QLatin1Char('/'));
+#ifdef HAS_QT_WEBENGINE
+    // setHtml + baseUrl embeds API before app.js; setUrl alone was too late for runJavaScript.
+    m_webView->setHtml(QString::fromUtf8(html), base);
+#else
     m_webView->document()->setBaseUrl(base);
     m_webView->setHtml(QString::fromUtf8(html));
 #endif
