@@ -47,22 +47,45 @@ fi
 PROJECTS_ROOT="${MOONCODING_PROJECTS_ROOT:-/root/Documents/MoonCodingProjects}"
 mkdir -p "$PROJECTS_ROOT" /root/mooncoding/fonts /tmp/fontconfig-cache
 
+# Honor explicit workspace: env, then --workspace / -C args, else last/conf.
+WS="${MOONCODING_WORKSPACE:-}"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --workspace|-C)
+      if [ -n "${2:-}" ]; then
+        WS="$2"
+        shift 2
+        continue
+      fi
+      shift
+      ;;
+    --workspace=*|-C=*)
+      WS="${1#*=}"
+      shift
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
 # Resolve an isolated per-project workspace. NEVER force the legacy shared
 # /root/mooncoding-ws folder — that caused cross-project file bleed.
-CONF="${XDG_CONFIG_HOME:-/root/.config}/MoonCoding/MoonCoding.conf"
-WS=""
-if [ -f "$CONF" ]; then
-  # Qt QSettings ini: lastWorkspace=/path
-  WS=$(sed -n 's/^lastWorkspace=//p' "$CONF" 2>/dev/null | head -1 | tr -d '\r')
+if [ -z "$WS" ]; then
+  CONF="${XDG_CONFIG_HOME:-/root/.config}/MoonCoding/MoonCoding.conf"
+  if [ -f "$CONF" ]; then
+    # Qt QSettings ini: lastWorkspace=/path
+    WS=$(sed -n 's/^lastWorkspace=//p' "$CONF" 2>/dev/null | head -1 | tr -d '\r')
+  fi
+  case "$WS" in
+  "$PROJECTS_ROOT"|"$PROJECTS_ROOT"/*)
+    [ -d "$WS" ] || WS=""
+    ;;
+  *)
+    WS=""
+    ;;
+  esac
 fi
-case "$WS" in
-"$PROJECTS_ROOT"|"$PROJECTS_ROOT"/*)
-  [ -d "$WS" ] || WS=""
-  ;;
-*)
-  WS=""
-  ;;
-esac
 
 if [ -z "$WS" ]; then
   # Newest project directory under projects root

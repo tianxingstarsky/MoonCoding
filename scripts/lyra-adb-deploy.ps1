@@ -77,8 +77,22 @@ Invoke-Adb push $vibeBin ("{0}/vibe" -f $RemoteDir)
 Invoke-Adb shell ("chmod +x {0}/mooncoding {0}/vibe" -f $RemoteDir)
 
 Write-Host "Pushing staged Qt6 libs..."
-Get-ChildItem -Path (Join-Path $StageDir "lib") -File | Where-Object { $_.Length -gt 0 } | ForEach-Object {
-    Invoke-Adb push $_.FullName ("{0}/lib/" -f $RemoteDir)
+# Only push one real ELF per soname. Windows-materialized stages often contain
+# full copies of libFoo.so / .so.6 / .so.6.4.3 (same ~190MB Core thrice).
+$libFiles = @(Get-ChildItem -Path (Join-Path $StageDir "lib") -File | Where-Object { $_.Length -gt 0 })
+$libGroups = $libFiles | Group-Object {
+    if ($_.Name -match '^(.*?\.so)(?:\.\d+)*$') { $Matches[1] } else { $_.Name }
+}
+foreach ($g in $libGroups) {
+    $pick = $g.Group |
+        Where-Object { $_.Name -match '\.so\.\d+' } |
+        Sort-Object { $_.Name.Length } -Descending |
+        Select-Object -First 1
+    if (-not $pick) {
+        $pick = $g.Group | Sort-Object Length -Descending | Select-Object -First 1
+    }
+    Write-Host ("  lib: {0} ({1:N0} bytes)" -f $pick.Name, $pick.Length)
+    Invoke-Adb push $pick.FullName ("{0}/lib/" -f $RemoteDir)
 }
 $platDir = Join-Path $StageDir "plugins\platforms"
 if (Test-Path $platDir) {
