@@ -36,15 +36,21 @@ public:
 
     void setWorkspace(const QString &workspace);
     void refresh();
+    /// Underlying preview surface (QWebEngineView when available).
+    QWidget *previewWebView() const;
 
     /// Call once before QApplication when WebEngine may be used (board/desktop).
     static void prepareWebEngineEnvironment();
 
-    /// Handle mooncoding://backend/start|stop from preview links (manual override).
+    /// Handle mooncoding://backend/start|stop|ime from preview links.
     void handleMooncodingUrl(const QUrl &url);
+    /// Called from WebEngine page (console / navigation) when HTML fields focus.
+    void notifyWebEditableFocus(bool focused);
 
 signals:
     void runCliApp(const QString &appName, const QString &command);
+    /// Micro-app HTML input/textarea/contenteditable gained or lost focus.
+    void webEditableFocusChanged(bool focused);
 
 private slots:
     void reloadPreview();
@@ -58,6 +64,7 @@ private:
     void buildUi();
     void loadIndexHtml();
     void populateFileList();
+    void ensureImeBridge();
     void startBackend();
     void ensureBackendRunning();
     void updateBackendButton();
@@ -77,6 +84,9 @@ private:
 
     RustBridge *m_bridge = nullptr;
     QString m_workspace;
+    /// Canonical workspace key last successfully loaded into the web view.
+    /// Used so revisiting Apps does not setHtml/reload an already-open preview.
+    QString m_loadedWorkspace;
     quint16 m_backendPort = 0;
 
     QStackedWidget *m_stack = nullptr;

@@ -14,12 +14,16 @@ impl Tool for TreeTool {
     }
 
     fn description(&self) -> &str {
-        "Create and maintain the persistent project tree. Humans and AI may both update node \
-         fields including status; prefer preserving recent human notes when still relevant. \
-         Every mutation requires expected_version equal to the \
-         current Tree version from the prompt or tree get. Example update: \
-         {\"action\":\"update_node\",\"node_id\":\"code\",\"expected_version\":3,\
-          \"status\":\"in_progress\",\"target_files\":[\"src/foo.rs\"]}. \
+        "Create and maintain the persistent project tree. Empty trees: you MUST bootstrap with \
+         create_nodes. Humans and AI may both update node fields including status; prefer \
+         preserving recent human notes when still relevant. Prefer expected_version equal to \
+         the current Tree version from the prompt (if omitted, the current version is used). \
+         Example create: {\"action\":\"create_nodes\",\"expected_version\":0,\
+\"nodes\":[{\"id\":\"root\",\"title\":\"App\",\"kind\":\"project\",\"status\":\"pending\"},\
+{\"id\":\"ui\",\"parent_id\":\"root\",\"title\":\"index.html\",\"kind\":\"task\",\
+\"status\":\"pending\",\"target_files\":[\"index.html\"]}]}. \
+         Example update: {\"action\":\"update_node\",\"node_id\":\"ui\",\"expected_version\":1,\
+\"status\":\"in_progress\",\"target_files\":[\"index.html\"]}. \
          status=completed requires real successful evidence from this run: copy \
          verify_command evidence_command or `vibe verify <path>` into evidence.command \
          (human form like `python apps/x/main.py` also matches)."
@@ -36,10 +40,13 @@ impl Tool for TreeTool {
                 "expected_version": {
                     "type": "integer",
                     "minimum": 0,
-                    "description": "Current tree version. Required for mutations."
+                    "description": "Current tree version. Optional; defaults to the live tree version."
                 },
                 "node_id": {"type": "string"},
-                "node": {"type": "object"},
+                "node": {
+                    "type": "object",
+                    "description": "Singular alias for create_nodes when creating one node."
+                },
                 "nodes": {
                     "type": "array",
                     "items": {
@@ -158,10 +165,18 @@ fn execute_tree_action(args: Value, ctx: &ToolContext) -> anyhow::Result<String>
         "get" => manager.to_json(),
         "create_nodes" => {
             let expected_version = expected_version(&args, &manager)?;
-            let values = args
-                .get("nodes")
-                .and_then(Value::as_array)
-                .ok_or_else(|| anyhow::anyhow!("nodes array is required"))?;
+            let values: Vec<Value> = if let Some(arr) = args.get("nodes").and_then(Value::as_array)
+            {
+                arr.clone()
+            } else if let Some(single) = args.get("node") {
+                vec![single.clone()]
+            } else {
+                anyhow::bail!(
+                    "nodes array is required (or pass singular node={{...}}). \
+                     Example: {{\"action\":\"create_nodes\",\"nodes\":[{{\"id\":\"root\",\
+\"title\":\"App\",\"kind\":\"project\",\"status\":\"pending\"}}]}}"
+                );
+            };
             if values.is_empty() {
                 anyhow::bail!("nodes array cannot be empty");
             }
@@ -169,7 +184,7 @@ fn execute_tree_action(args: Value, ctx: &ToolContext) -> anyhow::Result<String>
             let mut candidate = manager.clone();
             let mut current_version = expected_version;
             let mut ids = Vec::with_capacity(values.len());
-            for value in values {
+            for value in &values {
                 let mut input: NewTreeNode = serde_json::from_value(value.clone())?;
                 validate_evidence(&mut input.evidence, ctx)?;
                 let id = candidate.add_node(input, TreeActor::Ai, current_version)?;
@@ -221,15 +236,12 @@ fn execute_tree_action(args: Value, ctx: &ToolContext) -> anyhow::Result<String>
 }
 
 fn expected_version(args: &Value, manager: &crate::tree::TreeManager) -> anyhow::Result<u64> {
-    args.get("expected_version")
-        .and_then(Value::as_u64)
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "expected_version is required for tree mutation (current tree_version={}). \
-                 Call tree action=get first, then retry with that version.",
-                manager.version()
-            )
-        })
+    // Kill the footgun: if the model forgets expected_version, use the live tree
+    // version instead of failing the whole mutation.
+    if let Some(v) = args.get("expected_version").and_then(Value::as_u64) {
+        return Ok(v);
+    }
+    Ok(manager.version())
 }
 
 fn node_id(args: &Value) -> anyhow::Result<&str> {
@@ -515,5 +527,63 @@ mod tests {
         }];
         assert!(validate_evidence(&mut item, &ctx).is_ok());
         assert_eq!(item[0].tool.as_deref(), Some("vibe"));
+    }
+
+    #[tokio::test]
+    async fn create_nodes_bootstraps_empty_tree_without_expected_version() {
+        let ctx = context(Vec::new());
+        let tool = TreeTool;
+        let out = tool
+            .execute(
+                json!({
+                    "action": "create_nodes",
+                    "nodes": [
+                        {
+                            "id": "root",
+                            "title": "App",
+                            "kind": "project",
+                            "status": "pending"
+                        },
+                        {
+                            "id": "ui",
+                            "parent_id": "root",
+                            "title": "index.html",
+                            "kind": "task",
+                            "status": "pending",
+                            "target_files": ["index.html"]
+                        }
+                    ]
+                }),
+                &ctx,
+            )
+            .await;
+        assert_eq!(out.exit_code, 0, "{}", out.output);
+        let value: Value = serde_json::from_str(&out.output).expect("json");
+        assert_eq!(value["created_ids"].as_array().unwrap().len(), 2);
+        assert_eq!(value["tree_version"], 2);
+        assert_eq!(ctx.project_tree.read().unwrap().tree().nodes.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn create_nodes_accepts_singular_node_alias() {
+        let ctx = context(Vec::new());
+        let tool = TreeTool;
+        let out = tool
+            .execute(
+                json!({
+                    "action": "create_nodes",
+                    "node": {
+                        "id": "root",
+                        "title": "Solo",
+                        "kind": "project",
+                        "status": "pending"
+                    }
+                }),
+                &ctx,
+            )
+            .await;
+        assert_eq!(out.exit_code, 0, "{}", out.output);
+        let value: Value = serde_json::from_str(&out.output).expect("json");
+        assert_eq!(value["created_ids"][0], "root");
     }
 }

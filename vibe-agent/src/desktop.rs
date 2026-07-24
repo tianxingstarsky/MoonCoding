@@ -132,15 +132,70 @@ impl DesktopCore {
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("session not found: {session_id}"))?
         };
+        // Export a UI transcript that keeps tool calls/results (DB already stores them;
+        // the old filter dropped role=tool and empty-content assistant tool turns).
+        let mut tool_names = std::collections::HashMap::<String, String>::new();
+        for message in &session.messages {
+            if crate::prompt::is_runtime_context_message(message) {
+                continue;
+            }
+            if message.role != "assistant" {
+                continue;
+            }
+            if let Some(calls) = message.tool_calls.as_ref() {
+                for call in calls {
+                    tool_names.insert(call.id.clone(), call.function.name.clone());
+                }
+            }
+        }
+
         let messages = session
             .messages
             .iter()
-            .filter_map(|message| {
-                let content = message.content.as_deref()?.trim();
-                if content.is_empty() || !matches!(message.role.as_str(), "user" | "assistant") {
-                    return None;
+            .filter(|message| !crate::prompt::is_runtime_context_message(message))
+            .filter_map(|message| match message.role.as_str() {
+                "user" => {
+                    let content = message.content.as_deref()?.trim();
+                    if content.is_empty() {
+                        return None;
+                    }
+                    Some(json!({"role": "user", "content": content}))
                 }
-                Some(json!({"role": message.role, "content": content}))
+                "assistant" => {
+                    let content = message.content.clone().unwrap_or_default();
+                    let has_tools = message
+                        .tool_calls
+                        .as_ref()
+                        .map(|calls| !calls.is_empty())
+                        .unwrap_or(false);
+                    if content.trim().is_empty() && !has_tools {
+                        return None;
+                    }
+                    let mut obj = json!({
+                        "role": "assistant",
+                        "content": content,
+                    });
+                    if has_tools {
+                        if let Ok(value) = serde_json::to_value(&message.tool_calls) {
+                            obj["tool_calls"] = value;
+                        }
+                    }
+                    Some(obj)
+                }
+                "tool" => {
+                    let id = message.tool_call_id.clone().unwrap_or_default();
+                    let name = tool_names
+                        .get(&id)
+                        .cloned()
+                        .unwrap_or_else(|| "tool".to_string());
+                    Some(json!({
+                        "role": "tool",
+                        "content": message.content.clone().unwrap_or_default(),
+                        "tool_call_id": id,
+                        "name": name,
+                    }))
+                }
+                _ => None,
             })
             .collect::<Vec<Value>>();
         Ok(serde_json::to_string(&json!({
@@ -480,6 +535,72 @@ mod tests {
         assert!(prompt.contains("Human-owned fields are authoritative"));
         assert!(prompt.contains("src/main.rs"));
         assert!(prompt.contains("Verify Linux"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn session_json_exports_tool_calls_for_ui() -> Result<()> {
+        use crate::provider::{FunctionCall, Message, ToolCall};
+
+        let store = Arc::new(MemoryStore::default());
+        let tools = Arc::new(ToolRegistry::new());
+        let core = DesktopCore::new(
+            config(),
+            "tools-ui".to_string(),
+            tools,
+            store.clone(),
+        )?;
+
+        let mut session = Session::new(
+            "tools-ui".to_string(),
+            "test-model".to_string(),
+            "custom".to_string(),
+        );
+        session.messages = vec![
+            Message {
+                role: "user".to_string(),
+                content: Some("list files".to_string()),
+                tool_calls: None,
+                tool_call_id: None,
+            },
+            Message {
+                role: "assistant".to_string(),
+                content: Some(String::new()),
+                tool_calls: Some(vec![ToolCall {
+                    id: "call_1".to_string(),
+                    r#type: "function".to_string(),
+                    function: FunctionCall {
+                        name: "bash".to_string(),
+                        arguments: r#"{"command":"ls"}"#.to_string(),
+                    },
+                }]),
+                tool_call_id: None,
+            },
+            Message {
+                role: "tool".to_string(),
+                content: Some("a.rs\nb.rs".to_string()),
+                tool_calls: None,
+                tool_call_id: Some("call_1".to_string()),
+            },
+            Message {
+                role: "assistant".to_string(),
+                content: Some("Here are the files.".to_string()),
+                tool_calls: None,
+                tool_call_id: None,
+            },
+        ];
+        store.save(&session).await?;
+
+        let json: Value = serde_json::from_str(&core.session_json("tools-ui").await?)?;
+        let messages = json["messages"].as_array().expect("messages array");
+        assert_eq!(messages.len(), 4);
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[1]["tool_calls"].as_array().unwrap().len(), 1);
+        assert_eq!(messages[2]["role"], "tool");
+        assert_eq!(messages[2]["name"], "bash");
+        assert_eq!(messages[2]["tool_call_id"], "call_1");
+        assert_eq!(messages[3]["content"], "Here are the files.");
         Ok(())
     }
 }

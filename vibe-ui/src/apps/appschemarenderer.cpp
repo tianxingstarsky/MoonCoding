@@ -698,7 +698,9 @@ QWidget *AppSchemaRenderer::buildContainer(const QJsonObject &node,
             title->setTextFormat(Qt::PlainText);
             title->setWordWrap(true);
             QFont titleFont = title->font();
-            if (titleFont.pointSizeF() > 0.0) {
+            if (titleFont.pixelSize() > 0) {
+                titleFont.setPixelSize(titleFont.pixelSize() + 4);
+            } else if (titleFont.pointSizeF() > 0.0) {
                 titleFont.setPointSizeF(titleFont.pointSizeF() + 4.0);
             }
             titleFont.setBold(true);
@@ -812,11 +814,14 @@ void AppSchemaRenderer::applySemanticSize(QWidget *widget,
     widget->setProperty("semanticSize", size);
 
     QFont font = widget->font();
-    if (font.pointSizeF() > 0.0) {
-        const qreal delta = size == QStringLiteral("sm")
-            ? 0.0
-            : (size == QStringLiteral("lg") ? 3.0 : 1.0);
-        font.setPointSizeF(font.pointSizeF() + delta);
+    const int delta = size == QStringLiteral("sm")
+        ? 0
+        : (size == QStringLiteral("lg") ? 3 : 1);
+    if (font.pixelSize() > 0) {
+        font.setPixelSize(qMax(9, font.pixelSize() + delta));
+        widget->setFont(font);
+    } else if (font.pointSizeF() > 0.0) {
+        font.setPointSizeF(font.pointSizeF() + static_cast<qreal>(delta));
         widget->setFont(font);
     }
 

@@ -23,6 +23,7 @@ set(MOONCODING_UI_SOURCES
     src/input/softkeyboard.h
     src/input/boardime.cpp
     src/input/boardime.h
+    src/input/touchscroll.cpp
     src/input/touchscroll.h
     src/input/googlepinyinengine.cpp
     src/input/googlepinyinengine.h

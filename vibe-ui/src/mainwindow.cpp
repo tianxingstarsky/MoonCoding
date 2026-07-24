@@ -24,6 +24,7 @@
 #include <QMouseEvent>
 #include <QCryptographicHash>
 #include <QDateTime>
+#include <QDialog>
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QFile>
@@ -55,14 +56,33 @@
 #include <QUuid>
 #include <QVBoxLayout>
 
-static int configuredUiFontSize()
+static constexpr int kMinUiFontPx = 9;
+static constexpr int kMaxUiFontPx = 50;
+static constexpr int kFontPreviewSeconds = 10;
+
+static int defaultUiFontSize()
 {
-    int def = 13;
     if (qEnvironmentVariableIsSet("MOONCODING_BOARD")
         || qgetenv("QT_QPA_PLATFORM").startsWith("linuxfb")) {
-        def = 16; // DSI board: default larger for readability
+        return 16; // DSI board: default larger for readability
     }
-    return qBound(9, QSettings().value(QStringLiteral("appearance/fontSize"), def).toInt(), 28);
+    return 13;
+}
+
+static QString defaultUiFontFamily()
+{
+#ifdef Q_OS_WIN
+    return QStringLiteral("Microsoft YaHei UI");
+#else
+    return QStringLiteral("Noto Sans CJK SC");
+#endif
+}
+
+static int configuredUiFontSize()
+{
+    return qBound(kMinUiFontPx,
+                 QSettings().value(QStringLiteral("appearance/fontSize"), defaultUiFontSize()).toInt(),
+                 kMaxUiFontPx);
 }
 
 static void applyAppFont()
@@ -70,14 +90,9 @@ static void applyAppFont()
     opencode::installFontSubstitutions();
 
     QSettings settings;
-#ifdef Q_OS_WIN
-    const QString defaultFamily = QStringLiteral("Microsoft YaHei UI");
-#else
-    const QString defaultFamily = QStringLiteral("Noto Sans CJK SC");
-#endif
     const QString family = settings.value(
         QStringLiteral("appearance/fontFamily"),
-        defaultFamily).toString();
+        defaultUiFontFamily()).toString();
     const int size = configuredUiFontSize();
     QFont font;
     QStringList families = opencode::uiFontFamilies();
@@ -85,7 +100,8 @@ static void applyAppFont()
         families.prepend(family);
     }
     font.setFamilies(families);
-    font.setPointSize(size);
+    // Settings UI is labeled in px; keep QFont and QSS on the same pixel scale.
+    font.setPixelSize(size);
     const bool board = qEnvironmentVariableIsSet("MOONCODING_BOARD")
         || qgetenv("QT_QPA_PLATFORM").startsWith("linuxfb");
     if (board) {
@@ -393,6 +409,16 @@ MainWindow::MainWindow(const QString &workspace, QWidget *parent)
     });
     connect(m_ime, &BoardImeController::visibilityChanged, m_input,
             &InputWidget::setKeyboardButtonChecked);
+    connect(m_apps, &AppsWidget::webEditableFocusChanged, this, [this](bool focused) {
+        if (!m_ime || !m_apps) {
+            return;
+        }
+        if (focused) {
+            m_ime->showForWebView(m_apps->previewWebView());
+        } else {
+            m_ime->notifyWebEditableBlur();
+        }
+    });
 
     m_networkTimer->setInterval(15000);
     connect(m_networkTimer, &QTimer::timeout, this, &MainWindow::refreshNetworkStatus);
@@ -407,6 +433,9 @@ MainWindow::MainWindow(const QString &workspace, QWidget *parent)
     QSettings settings;
     m_lightTheme = settings.value(QStringLiteral("appearance/lightTheme"), false).toBool();
     applyTheme(m_lightTheme);
+    if (m_input) {
+        m_input->setContextWindowK(configuredContextWindowK());
+    }
 
     // One-time: old default (40) is too low for block-based vibe workflows.
     if (!settings.value(QStringLiteral("agent/maxStepsMigrated_v2")).toBool()) {
@@ -689,8 +718,10 @@ QWidget *MainWindow::buildSettingsPage()
     fontCombo->setCurrentFont(QFont(
         settings.value(QStringLiteral("appearance/fontFamily"), QStringLiteral("Segoe UI")).toString()));
     auto *fontSizeSpin = new QSpinBox(container);
-    fontSizeSpin->setRange(9, 24);
-    fontSizeSpin->setValue(settings.value(QStringLiteral("appearance/fontSize"), 13).toInt());
+    fontSizeSpin->setRange(kMinUiFontPx, kMaxUiFontPx);
+    fontSizeSpin->setValue(qBound(kMinUiFontPx,
+                                  settings.value(QStringLiteral("appearance/fontSize"), defaultUiFontSize()).toInt(),
+                                  kMaxUiFontPx));
     fontSizeSpin->setSuffix(QStringLiteral(" px"));
     auto *fontRow = new QHBoxLayout;
     fontRow->setContentsMargins(0, 0, 0, 0);
@@ -724,6 +755,23 @@ QWidget *MainWindow::buildSettingsPage()
     layout->addRow(makeSection(tr("Agent 参数")));
     layout->addRow(tr("最大步数"), maxSteps);
     layout->addRow(tr("温度"), temperature);
+
+    auto *contextWindowSpin = new QSpinBox(container);
+    contextWindowSpin->setRange(8, 2000);
+    contextWindowSpin->setSuffix(QStringLiteral(" k"));
+    contextWindowSpin->setValue(qBound(
+        8,
+        settings.value(QStringLiteral("agent/contextWindowK"), 200).toInt(),
+        2000));
+    contextWindowSpin->setToolTip(
+        tr("上下文窗口上限（千 tokens）。默认 200k。非必要请勿更改。"));
+    auto *contextHint = new QLabel(
+        tr("非必要不要更改默认上下文长度限制（200k）。改错可能导致费用升高或模型拒绝请求。"),
+        container);
+    contextHint->setObjectName(QStringLiteral("mutedLabel"));
+    contextHint->setWordWrap(true);
+    layout->addRow(tr("上下文窗口"), contextWindowSpin);
+    layout->addRow(QString(), contextHint);
 
     {
         auto *sep = new QFrame(container);
@@ -771,22 +819,58 @@ QWidget *MainWindow::buildSettingsPage()
     saveBtn->setFocusPolicy(Qt::NoFocus);
     layout->addRow(saveBtn);
 
+    auto *resetBtn = new QPushButton(tr("重置所有设置…"), container);
+    resetBtn->setMinimumHeight(48);
+    resetBtn->setFocusPolicy(Qt::NoFocus);
+    layout->addRow(resetBtn);
+    connect(resetBtn, &QPushButton::clicked, this, &MainWindow::confirmResetAllSettings);
+
     connect(saveBtn, &QPushButton::clicked, this, [this, sourceCombo, baseUrl, apiKeyEdit,
-                                                    maxSteps, temperature, fontCombo, fontSizeSpin,
-                                                    langCombo] {
+                                                    maxSteps, temperature, contextWindowSpin,
+                                                    fontCombo, fontSizeSpin, langCombo] {
         QSettings s;
+        const int previousFontSize = configuredUiFontSize();
+        const QString previousFontFamily = s.value(
+            QStringLiteral("appearance/fontFamily"),
+            defaultUiFontFamily()).toString();
+        const int newFontSize = fontSizeSpin->value();
+        const QString newFontFamily = fontCombo->currentFont().family();
+        const bool fontChanged =
+            previousFontSize != newFontSize || previousFontFamily != newFontFamily;
+
         const QString apiSource = sourceCombo->currentData(Qt::UserRole).toString();
         s.setValue(QStringLiteral("provider/api_source"), apiSource);
         s.setValue(QStringLiteral("provider/base_url"), baseUrl->text().trimmed());
         s.setValue(QStringLiteral("provider/api_key"), apiKeyEdit->text().trimmed());
         s.setValue(QStringLiteral("agent/maxSteps"), maxSteps->value());
         s.setValue(QStringLiteral("provider/temperature"), temperature->value());
-        s.setValue(QStringLiteral("appearance/fontFamily"), fontCombo->currentFont().family());
-        s.setValue(QStringLiteral("appearance/fontSize"), fontSizeSpin->value());
-        applyTheme(m_lightTheme);
-        if (m_chat) {
-            m_chat->refreshFonts();
+        s.setValue(QStringLiteral("agent/contextWindowK"),
+                   qBound(8, contextWindowSpin->value(), 2000));
+        s.setValue(QStringLiteral("appearance/fontFamily"), newFontFamily);
+        s.setValue(QStringLiteral("appearance/fontSize"), newFontSize);
+
+        if (m_input) {
+            m_input->setContextWindowK(configuredContextWindowK());
         }
+
+        if (fontChanged) {
+            if (!confirmFontPreviewOrRevert(previousFontSize, previousFontFamily)) {
+                // Spin still shows the previewed value; sync back after revert.
+                fontSizeSpin->setValue(configuredUiFontSize());
+                fontCombo->setCurrentFont(QFont(s.value(
+                    QStringLiteral("appearance/fontFamily"),
+                    defaultUiFontFamily()).toString()));
+                showFlashMessage(tr("已恢复原来的字体设置。"), 3000);
+            } else {
+                showFlashMessage(tr("字体更改已确认。"), 2500);
+            }
+        } else {
+            applyTheme(m_lightTheme);
+            if (m_chat) {
+                m_chat->refreshFonts();
+            }
+        }
+
         const QString lang = langCombo->currentData().toString();
         LanguageManager::instance().setLanguage(lang);
 
@@ -797,9 +881,13 @@ QWidget *MainWindow::buildSettingsPage()
         const QJsonObject options = loadBackendOptions();
         if (!m_bridge->isBusy()) {
             m_bridge->reinitialize(m_workspace, options);
-            showFlashMessage(tr("设置已保存并立即生效。"), 3000);
-        } else {
+            if (!fontChanged) {
+                showFlashMessage(tr("设置已保存并立即生效。"), 3000);
+            }
+        } else if (!fontChanged) {
             showFlashMessage(tr("设置已保存，API 更改将在当前任务完成后生效。"), 4000);
+        } else {
+            showFlashMessage(tr("字体已处理；其余 API 更改将在当前任务完成后生效。"), 4000);
         }
     });
 
@@ -1497,8 +1585,9 @@ void MainWindow::toggleTheme()
 
 void MainWindow::updateTokenStatus(quint64 tokensIn, quint64 tokensOut, quint64 steps)
 {
+    const int windowK = configuredContextWindowK();
     m_tokenLabel->setText(
-        tr("%1 步 · %2 入 / %3 出").arg(steps).arg(tokensIn).arg(tokensOut));
+        tr("%1 步 · 入 %2 / 出 %3 · 窗口 %4k").arg(steps).arg(tokensIn).arg(tokensOut).arg(windowK));
 }
 
 void MainWindow::applyTheme(bool light)
@@ -1514,8 +1603,9 @@ void MainWindow::applyTheme(bool light)
         }
         applyAppFont();
         const int sz = configuredUiFontSize();
-        const int szSm = qMax(9, sz - 1);
+        const int szSm = qMax(kMinUiFontPx, sz - 2);
         const int szLg = sz + 2;
+        const int szTitle = sz + 6;
         const int szBrand = sz + 5;
 
         // Board: touch metrics — font sizes track the user setting.
@@ -1539,8 +1629,8 @@ QStatusBar { min-height: 28px; font-weight: 600; }
                        .toUtf8();
         }
 
-        // Append last so user font size wins over hardcoded 14px in theme files.
-        // Do NOT put SoftKeyboard keys in the general QPushButton rule — they need larger glyphs.
+        // Append last so user font size wins over hardcoded px in theme files.
+        // Cover chat chrome / tools / titles that previously kept fixed 10–14px.
         css += QStringLiteral(R"(
 QMainWindow, QDialog, #ChatScrollArea, #MessageContainer, #InputFrame, #ContextBar {
     font-size: %1px;
@@ -1549,34 +1639,64 @@ QMainWindow, QDialog, #ChatScrollArea, #MessageContainer, #InputFrame, #ContextB
 QLabel, QLineEdit, QTextEdit, QPlainTextEdit, QTextBrowser,
 QComboBox, QAbstractSpinBox, QListWidget, QTreeView, QCheckBox, QRadioButton,
 QMenu, QStatusBar, #mutedLabel, #composerFooter,
-#contextInfo, #promptEditor, #sendButton, #settingsSection, #networkStatus {
+#contextInfo, #promptEditor, #sendButton, #settingsSection, #networkStatus,
+#messageBody, #answerBody, #messageRole, #toolName, #toolOk, #toolFail,
+#thinkingSummary, #appToolbar QLabel, #appToolbar QToolButton {
     font-size: %1px;
     font-weight: 600;
+}
+QTreeView, QTreeView::item, QHeaderView::section {
+    font-size: %1px;
 }
 QPushButton, QToolButton {
     font-size: %1px;
     font-weight: 700;
 }
-#messageBody { font-size: %1px; font-weight: 600; }
-#brand { font-size: %2px; font-weight: 700; }
-#softKeyboard #imeCompose { font-size: %3px; font-weight: 700; }
+#messageMeta, #toolDetail, #toolToggle, #toolOutput, #thinkingBody,
+#composerFooter, #contextInfo, #networkStatus, QStatusBar, QToolTip, QMenu::item {
+    font-size: %2px;
+    font-weight: 600;
+}
+#pageTitle, #emptyProjectsBanner {
+    font-size: %3px;
+    font-weight: 700;
+}
+#panelTitle, #flashBanner, #backButton {
+    font-size: %4px;
+    font-weight: 700;
+}
+#brand { font-size: %5px; font-weight: 700; }
+#softKeyboard #imeCompose { font-size: %6px; font-weight: 700; }
 #softKeyboard #imeKey, #softKeyboard #imeKeyWide, #softKeyboard #imeKeySpace {
-    font-size: %4px; font-weight: 700;
+    font-size: %7px; font-weight: 700;
 }
-#softKeyboard #imeCandidate { font-size: %5px; font-weight: 700; }
+#softKeyboard #imeCandidate { font-size: %8px; font-weight: 700; }
 #softKeyboard #imePageBtn {
-    font-size: %6px; font-weight: 700; min-width: 72px;
+    font-size: %9px; font-weight: 700; min-width: 72px;
 }
-#softKeyboard #imeKeyWide, #softKeyboard #imeKeySpace { font-size: %6px; font-weight: 700; }
+#softKeyboard #imeKeyWide, #softKeyboard #imeKeySpace { font-size: %9px; font-weight: 700; }
 )")
                    .arg(sz)
+                   .arg(szSm)
+                   .arg(szTitle)
+                   .arg(szLg)
                    .arg(szBrand)
                    .arg(qMax(16, sz + 2))
                    .arg(qMax(22, sz + 8))
                    .arg(qMax(20, sz + 6))
                    .arg(qMax(16, sz + 3))
                    .toUtf8();
-        Q_UNUSED(szSm);
+
+        // Force tree text color after theme swap — linuxfb often ignores base QSS item color.
+        const QString treeFg = light ? QStringLiteral("#1d1d1f") : QStringLiteral("#c9d1d9");
+        const QString treeHeaderBg = light ? QStringLiteral("#f2f2f7") : QStringLiteral("#161b22");
+        css += QStringLiteral(
+                   "QTreeView { color: %1; }\n"
+                   "QTreeView::item { color: %1; }\n"
+                   "QTreeView::item:selected { color: #ffffff; }\n"
+                   "QHeaderView::section { color: %1; background: %2; }\n")
+                   .arg(treeFg, treeHeaderBg)
+                   .toUtf8();
 
         qApp->setStyleSheet(QString::fromUtf8(css));
         // Force every widget to re-evaluate objectName selectors after swap.
@@ -1589,10 +1709,192 @@ QPushButton, QToolButton {
             w->style()->polish(w);
             w->update();
         }
+        if (m_input) {
+            // Defer until polish settles — avoids re-entrant layout during theme swap.
+            QTimer::singleShot(0, m_input, &InputWidget::refreshLayout);
+        }
     } else {
         qWarning("MoonCoding failed to open theme stylesheet");
         applyAppFont();
     }
+}
+
+bool MainWindow::confirmFontPreviewOrRevert(int previousSize, const QString &previousFamily)
+{
+    applyTheme(m_lightTheme);
+    if (m_chat) {
+        m_chat->refreshFonts();
+    }
+
+    QDialog dlg(this);
+    dlg.setObjectName(QStringLiteral("fontPreviewDialog"));
+    dlg.setWindowTitle(tr("确认字体更改"));
+    dlg.setModal(true);
+    const int dlgW = qBound(280, width() - 48, 560);
+    dlg.setMinimumWidth(dlgW);
+
+    auto *lay = new QVBoxLayout(&dlg);
+    lay->setContentsMargins(16, 16, 16, 16);
+    lay->setSpacing(12);
+
+    auto *msg = new QLabel(
+        tr("正在预览新字体大小（最多 %1 px）。\n若字太大导致难以操作，请点「恢复」或等待倒计时结束自动恢复。")
+            .arg(kMaxUiFontPx),
+        &dlg);
+    msg->setObjectName(QStringLiteral("mutedLabel"));
+    msg->setWordWrap(true);
+
+    auto *countdown = new QLabel(&dlg);
+    countdown->setObjectName(QStringLiteral("pageTitle"));
+    countdown->setAlignment(Qt::AlignCenter);
+    countdown->setWordWrap(true);
+
+    auto *btnRow = new QHBoxLayout;
+    btnRow->setSpacing(10);
+    auto *revertBtn = new QPushButton(tr("恢复原设置"), &dlg);
+    revertBtn->setMinimumHeight(52);
+    auto *okBtn = new QPushButton(tr("确认更改"), &dlg);
+    okBtn->setObjectName(QStringLiteral("primaryButton"));
+    okBtn->setMinimumHeight(52);
+    okBtn->setDefault(true);
+    btnRow->addWidget(revertBtn, 1);
+    btnRow->addWidget(okBtn, 1);
+
+    lay->addWidget(msg);
+    lay->addWidget(countdown);
+    lay->addLayout(btnRow);
+
+    int left = kFontPreviewSeconds;
+    const auto updateCountdown = [countdown, &left]() {
+        countdown->setText(QCoreApplication::translate("MainWindow", "%1 秒后自动恢复").arg(left));
+    };
+    updateCountdown();
+
+    QTimer timer(&dlg);
+    timer.setInterval(1000);
+    QObject::connect(&timer, &QTimer::timeout, &dlg, [&]() {
+        --left;
+        if (left <= 0) {
+            dlg.reject();
+            return;
+        }
+        updateCountdown();
+    });
+    QObject::connect(okBtn, &QPushButton::clicked, &dlg, &QDialog::accept);
+    QObject::connect(revertBtn, &QPushButton::clicked, &dlg, &QDialog::reject);
+    timer.start();
+
+    const bool accepted = dlg.exec() == QDialog::Accepted;
+    if (!accepted) {
+        QSettings s;
+        s.setValue(QStringLiteral("appearance/fontSize"),
+                   qBound(kMinUiFontPx, previousSize, kMaxUiFontPx));
+        s.setValue(QStringLiteral("appearance/fontFamily"), previousFamily);
+        applyTheme(m_lightTheme);
+        if (m_chat) {
+            m_chat->refreshFonts();
+        }
+        return false;
+    }
+    return true;
+}
+
+int MainWindow::configuredContextWindowK() const
+{
+    return qBound(8, QSettings().value(QStringLiteral("agent/contextWindowK"), 200).toInt(), 2000);
+}
+
+void MainWindow::confirmResetAllSettings()
+{
+    QDialog dlg(this);
+    dlg.setObjectName(QStringLiteral("resetSettingsDialog"));
+    dlg.setWindowTitle(tr("重置所有设置"));
+    dlg.setModal(true);
+    dlg.setMinimumWidth(qBound(280, width() - 48, 560));
+
+    auto *lay = new QVBoxLayout(&dlg);
+    lay->setContentsMargins(16, 16, 16, 16);
+    lay->setSpacing(12);
+
+    auto *warn = new QLabel(
+        tr("风险：将清空本机全部 MoonCoding 设置（API Key、模型、字体、主题、语言、上下文窗口等），"
+           "并恢复默认值。项目文件与会话记录不会删除，但界面配置会丢失。"),
+        &dlg);
+    warn->setObjectName(QStringLiteral("mutedLabel"));
+    warn->setWordWrap(true);
+
+    auto *countdown = new QLabel(&dlg);
+    countdown->setObjectName(QStringLiteral("pageTitle"));
+    countdown->setAlignment(Qt::AlignCenter);
+    countdown->setWordWrap(true);
+
+    auto *btnRow = new QHBoxLayout;
+    auto *cancelBtn = new QPushButton(tr("取消 / 反悔"), &dlg);
+    cancelBtn->setMinimumHeight(52);
+    auto *resetBtn = new QPushButton(tr("确认重置"), &dlg);
+    resetBtn->setObjectName(QStringLiteral("primaryButton"));
+    resetBtn->setMinimumHeight(52);
+    resetBtn->setEnabled(false);
+    btnRow->addWidget(cancelBtn, 1);
+    btnRow->addWidget(resetBtn, 1);
+
+    lay->addWidget(warn);
+    lay->addWidget(countdown);
+    lay->addLayout(btnRow);
+
+    int left = 3;
+    const auto updateCountdown = [countdown, resetBtn, &left]() {
+        if (left > 0) {
+            countdown->setText(
+                QCoreApplication::translate("MainWindow", "%1 秒后可确认重置…").arg(left));
+            resetBtn->setEnabled(false);
+        } else {
+            countdown->setText(
+                QCoreApplication::translate("MainWindow", "可以确认重置了。此操作不可撤销。"));
+            resetBtn->setEnabled(true);
+        }
+    };
+    updateCountdown();
+
+    QTimer timer(&dlg);
+    timer.setInterval(1000);
+    QObject::connect(&timer, &QTimer::timeout, &dlg, [&]() {
+        if (left <= 0) {
+            return;
+        }
+        --left;
+        updateCountdown();
+    });
+    QObject::connect(cancelBtn, &QPushButton::clicked, &dlg, &QDialog::reject);
+    QObject::connect(resetBtn, &QPushButton::clicked, &dlg, &QDialog::accept);
+    timer.start();
+
+    if (dlg.exec() != QDialog::Accepted) {
+        showFlashMessage(tr("已取消重置。"), 2000);
+        return;
+    }
+
+    QSettings().clear();
+    m_lightTheme = false;
+    applyTheme(m_lightTheme);
+    if (m_input) {
+        m_input->setContextWindowK(configuredContextWindowK());
+        m_input->setContextPromptTokens(0);
+    }
+    if (m_chat) {
+        m_chat->refreshFonts();
+    }
+    LanguageManager::instance().setLanguage(QStringLiteral("zh"));
+    updateSettingsModelButton();
+    if (m_input) {
+        m_input->setContextModel(QSettings().value(QStringLiteral("provider/model")).toString());
+    }
+    if (m_bridge && !m_bridge->isBusy()) {
+        m_bridge->reinitialize(m_workspace, loadBackendOptions());
+    }
+    showFlashMessage(tr("全部设置已重置为默认。请重新配置 API。"), 5000);
+    // Rebuild settings page widgets by navigating away/back is hard; tell user to reopen.
+    goToPage(ChatPage);
 }
 
 void MainWindow::toggleHistoryPanel()
@@ -1702,6 +2004,11 @@ void MainWindow::connectSignals()
     connect(m_bridge, &RustBridge::thinkingDelta, m_chat, &ChatWidget::appendThinkingDelta);
     connect(m_bridge, &RustBridge::textDelta, m_chat, &ChatWidget::appendAssistantDelta);
     connect(m_bridge, &RustBridge::textDone, m_chat, &ChatWidget::finishAssistantMessage);
+    connect(m_bridge, &RustBridge::textDone, this, [this](const QString &, quint64 tokensIn, quint64) {
+        if (m_input) {
+            m_input->setContextPromptTokens(tokensIn);
+        }
+    });
     connect(m_bridge, &RustBridge::toolCallStarted, m_chat, &ChatWidget::showToolStart);
     connect(m_bridge, &RustBridge::toolCallFinished, m_chat, &ChatWidget::showToolResult);
     connect(m_bridge, &RustBridge::treeUpdated, m_tree, &TreeWidget::setTree);

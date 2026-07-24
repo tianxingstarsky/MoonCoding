@@ -56,7 +56,14 @@ public slots:
 
     void setContextSteps(quint64 steps);
 
+    void setContextWindowK(int windowK);
+
+    void setContextPromptTokens(quint64 promptTokens);
+
     void setKeyboardButtonChecked(bool checked);
+
+    /// Remeasure editor height after theme/font changes.
+    void refreshLayout();
 
 
 
@@ -110,9 +117,15 @@ private:
 
     quint64 m_contextTokensOut = 0;
 
+    quint64 m_contextPromptTokens = 0;
+
+    int m_contextWindowK = 200;
+
     bool m_busy = false;
 
     bool m_ready = false;
+
+    bool m_adjustingHeight = false;
 
 
 

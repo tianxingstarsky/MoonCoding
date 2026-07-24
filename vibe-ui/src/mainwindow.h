@@ -94,6 +94,10 @@ private:
     void goToPage(PageIndex idx);
     void showFlashMessage(const QString &msg, int durationMs);
     void enableBoardTouchScroll();
+    /// Apply current settings font, then ask to keep it within 10s; revert on cancel/timeout.
+    bool confirmFontPreviewOrRevert(int previousSize, const QString &previousFamily);
+    void confirmResetAllSettings();
+    int configuredContextWindowK() const;
 
     QWidget *buildNewProjectPage();
     QWidget *buildOpenProjectPage();

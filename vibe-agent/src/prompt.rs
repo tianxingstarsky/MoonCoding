@@ -63,12 +63,25 @@ impl PromptBuilder {
         self
     }
 
-    /// 组装最终 system prompt
+    /// 组装最终 system prompt（兼容：stable + dynamic）
     pub fn build(&self) -> String {
+        let mut parts = Vec::new();
+        let stable = self.build_stable();
+        if !stable.is_empty() {
+            parts.push(stable);
+        }
+        let dynamic = self.build_dynamic();
+        if !dynamic.is_empty() {
+            parts.push(dynamic);
+        }
+        parts.join("\n\n")
+    }
+
+    /// Prefix-stable system content for provider prompt caching.
+    /// Must not include per-step tree / vector / step counters.
+    pub fn build_stable(&self) -> String {
         let mut parts: Vec<String> = Vec::new();
         parts.push(self.personality.clone());
-
-        // App-building constraints — always injected so the agent knows the rules.
         parts.push(APP_CONSTRAINTS.to_string());
         parts.push(RUNTIME_AND_COMPLETION.to_string());
         parts.push(BOARD_DEPLOYMENT.to_string());
@@ -91,11 +104,17 @@ impl PromptBuilder {
                 self.project_instructions
             ));
         }
+        // Tool schemas are sent via the API `tools` array — do NOT duplicate
+        // them as prose here (OpenCode-style: one source of truth, stable prefix).
+        parts.join("\n\n")
+    }
+
+    /// Per-step volatile context. Trailing tagged message keeps the
+    /// system + conversation prefix cache-stable across steps.
+    pub fn build_dynamic(&self) -> String {
+        let mut parts: Vec<String> = Vec::new();
         if !self.tree_summary.is_empty() {
             parts.push(format!("## Project Tree (Current)\n{}", self.tree_summary));
-        }
-        if !self.tool_descriptions.is_empty() {
-            parts.push(format!("## Available Tools\n{}", self.tool_descriptions));
         }
         if !self.vector_guidance.is_empty() {
             parts.push(format!(
@@ -110,6 +129,66 @@ impl PromptBuilder {
     }
 }
 
+/// Marker for ephemeral per-step context messages (not part of the stable prefix).
+pub const RUNTIME_CTX_MARKER: &str = "<!-- mooncoding_runtime_context -->";
+
+pub fn is_runtime_context_message(message: &crate::provider::Message) -> bool {
+    message
+        .content
+        .as_deref()
+        .is_some_and(|c| c.starts_with(RUNTIME_CTX_MARKER))
+}
+
+pub fn strip_runtime_context_messages(messages: &mut Vec<crate::provider::Message>) {
+    messages.retain(|m| !is_runtime_context_message(m));
+}
+
+pub fn ensure_stable_system_message(
+    messages: &mut Vec<crate::provider::Message>,
+    stable: &str,
+) {
+    match messages.first() {
+        Some(m) if m.role == "system" && !is_runtime_context_message(m) => {
+            if m.content.as_deref() != Some(stable) {
+                messages[0].content = Some(stable.to_string());
+            }
+        }
+        _ => {
+            messages.insert(
+                0,
+                crate::provider::Message {
+                    role: "system".to_string(),
+                    content: Some(stable.to_string()),
+                    tool_calls: None,
+                    tool_call_id: None,
+                },
+            );
+        }
+    }
+}
+
+pub fn attach_runtime_context_message(
+    messages: &mut Vec<crate::provider::Message>,
+    dynamic: &str,
+) {
+    strip_runtime_context_messages(messages);
+    if dynamic.trim().is_empty() {
+        return;
+    }
+    // Trailing *user* (not second system): OpenCode/Claude-style ephemeral tail.
+    // Keeps system[0]+history as a byte-stable cacheable prefix.
+    messages.push(crate::provider::Message {
+        role: "user".to_string(),
+        content: Some(format!(
+            "{RUNTIME_CTX_MARKER}\n\
+             [MoonCoding runtime context — ephemeral, not a human message]\n\
+             {dynamic}"
+        )),
+        tool_calls: None,
+        tool_call_id: None,
+    });
+}
+
 /// Fixed product/toolchain facts + completion criteria (not host-specific paths).
 const RUNTIME_AND_COMPLETION: &str = r#"## Product & toolchain facts
 - MoonCoding GUI is **Qt 6 / C++** on desktop and board (same `vibe-ui` tree).
@@ -122,10 +201,12 @@ const RUNTIME_AND_COMPLETION: &str = r#"## Product & toolchain facts
   Do not call `vibe` or `apps` tools in normal workflows.
 
 ## Debugging & "done" criteria
-1. Ship a working `index.html` at the project root (required entry).
-2. Prove UI/backend with `verify_command` when useful (e.g. `python -m py_compile backend.py`).
-3. Mark tree nodes `completed` only with real exit-0 evidence from this workspace.
-4. If stuck, set `failed`/`needs_review`, explain briefly, and stop.
+1. If the project tree is empty, call `tree` `create_nodes` first (include
+   `expected_version` from the prompt, or omit it to use the current version).
+2. Ship a working `index.html` at the project root (required entry).
+3. Prove UI/backend with `verify_command` when useful (e.g. `python -m py_compile backend.py`).
+4. Mark tree nodes `completed` only with real exit-0 evidence from this workspace.
+5. If stuck, set `failed`/`needs_review`, explain briefly, and stop.
 "#;
 
 /// Board full-product deployment (Lyra / linuxfb).
@@ -275,6 +356,54 @@ mod tests {
     use super::*;
 
     #[test]
+    fn stable_prompt_excludes_volatile_tree_and_steps() {
+        let builder = PromptBuilder::new("personality")
+            .with_project_instructions("project rule")
+            .with_tree_summary("human_locked")
+            .with_tools("tree")
+            .with_vector_guidance("pattern")
+            .with_session_context("step 3/10")
+            .with_runtime_env("OS: windows");
+        let stable = builder.build_stable();
+        let dynamic = builder.build_dynamic();
+        assert!(!stable.contains("## Available Tools"));
+        assert!(stable.contains("## Current host facts\nOS: windows"));
+        assert!(!stable.contains("## Project Tree (Current)"));
+        assert!(!stable.contains("human_locked"));
+        assert!(!stable.contains("## Engineering Patterns & Examples"));
+        assert!(!stable.contains("step 3/10"));
+        assert!(dynamic.contains("human_locked"));
+        assert!(dynamic.contains("## Engineering Patterns & Examples\npattern"));
+        assert!(dynamic.contains("step 3/10"));
+    }
+
+    #[test]
+    fn runtime_context_message_is_stripped_from_history() {
+        use crate::provider::Message;
+        let mut messages = vec![
+            Message {
+                role: "system".to_string(),
+                content: Some("stable".into()),
+                tool_calls: None,
+                tool_call_id: None,
+            },
+            Message {
+                role: "user".to_string(),
+                content: Some("hi".into()),
+                tool_calls: None,
+                tool_call_id: None,
+            },
+        ];
+        attach_runtime_context_message(&mut messages, "tree v1");
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages.last().unwrap().role, "user");
+        assert!(is_runtime_context_message(messages.last().unwrap()));
+        strip_runtime_context_messages(&mut messages);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[1].content.as_deref(), Some("hi"));
+    }
+
+    #[test]
     fn prompt_layers_keep_human_tree_context_separate() {
         let prompt = PromptBuilder::new("personality")
             .with_project_instructions("project rule")
@@ -284,10 +413,9 @@ mod tests {
             .build();
         assert!(prompt.contains("## Project Instructions\nproject rule"));
         assert!(prompt.contains("## Project Tree (Current)\nhuman_locked"));
-        assert!(prompt.contains("## Available Tools\ntree"));
+        assert!(!prompt.contains("## Available Tools"));
         assert!(prompt.contains("## Current host facts\nOS: windows"));
         assert!(prompt.contains("Qt 6"));
-        assert!(prompt.contains("## Board deployment"));
         assert!(prompt.contains("linuxfb"));
         assert!(!prompt.contains("Qt 5 only"));
         assert!(!prompt.contains("kiosk-only shell as the product"));

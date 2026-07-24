@@ -15,8 +15,14 @@ use crate::tree::TreeManager;
 use crate::vector::KnowledgeBase;
 
 const TOOL_OUTPUT_MAX_CHARS: usize = 4000;
-const PRUNE_START_STEP: usize = 12;
-const PRUNE_KEEP_ASSISTANT: usize = 6;
+/// Hard prune rewrites the middle of history and busts prompt-cache prefixes.
+/// Prefer soft-compress on the *sent* copy; only hard-prune very long sessions.
+const PRUNE_START_STEP: usize = 48;
+const PRUNE_KEEP_ASSISTANT: usize = 12;
+/// Keep the newest N tool results verbatim when soft-compressing for send.
+const SOFT_KEEP_RECENT_TOOLS: usize = 8;
+const SOFT_TOOL_HEAD: usize = 600;
+const SOFT_TOOL_TAIL: usize = 400;
 /// Max times we auto-nudge the model to keep going in one user turn.
 const MAX_AUTO_CONTINUES: u32 = 4;
 
@@ -119,6 +125,15 @@ pub async fn run_agent_with_interrupt(
     let mut run_steps = 0u64;
     let mut auto_continues = 0u32;
     let runtime_env = crate::prompt::build_runtime_env(cfg);
+    // Build the stable system prefix ONCE for this user turn (OpenCode-style).
+    // Rebuilding every tool step risks accidental drift; tools schemas already
+    // go in the request `tools` array, not in system prose.
+    let stable_prompt = crate::prompt::PromptBuilder::new(&crate::prompt::load_personality())
+        .with_language(&cfg.language)
+        .with_project_instructions(&project_instructions)
+        .with_runtime_env(&runtime_env)
+        .build_stable();
+    crate::prompt::ensure_stable_system_message(&mut session.messages, &stable_prompt);
 
     loop {
         if interrupted.load(Ordering::SeqCst) {
@@ -130,7 +145,7 @@ pub async fn run_agent_with_interrupt(
             break;
         }
 
-        // ── 构建 system prompt ──
+        // Volatile state only at the END — never rewrite messages[0]/history.
         let tree_summary = project_tree
             .read()
             .map_err(|_| anyhow::anyhow!("project tree lock poisoned"))?
@@ -139,36 +154,24 @@ pub async fn run_agent_with_interrupt(
             .read()
             .map_err(|_| anyhow::anyhow!("knowledge base lock poisoned"))?
             .prompt_guidance(user_input, 5);
-        let system_prompt = crate::prompt::PromptBuilder::new(&crate::prompt::load_personality())
-            .with_language(&cfg.language)
-            .with_project_instructions(&project_instructions)
-            .with_tools(&tool_descriptions_text(tools))
+        let dynamic_prompt = crate::prompt::PromptBuilder::new("")
             .with_tree_summary(&tree_summary)
             .with_vector_guidance(&vector_guidance)
-            .with_runtime_env(&runtime_env)
             .with_session_context(&format!(
                 "current run step {}/{}; cumulative session step {}; auto-continues used {}/{}",
                 run_steps, max_steps, step, auto_continues, MAX_AUTO_CONTINUES
             ))
-            .build();
-
-        // 注入 system prompt padding
-        match session.messages.first() {
-            Some(m) if m.role == "system" => {
-                session.messages[0].content = Some(system_prompt.clone());
-            }
-            _ => {
-                session.messages.insert(
-                    0,
-                    Message {
-                        role: "system".to_string(),
-                        content: Some(system_prompt),
-                        tool_calls: None,
-                        tool_call_id: None,
-                    },
-                );
-            }
-        }
+            .build_dynamic();
+        // OpenCode/OpenClaw-style: soft-trim old tool bodies on a *send copy* only.
+        // Session history stays byte-stable → better prompt-cache prefix reuse.
+        let mut send_messages = session.messages.clone();
+        soft_compress_old_tool_results(
+            &mut send_messages,
+            SOFT_KEEP_RECENT_TOOLS,
+            SOFT_TOOL_HEAD,
+            SOFT_TOOL_TAIL,
+        );
+        crate::prompt::attach_runtime_context_message(&mut send_messages, &dynamic_prompt);
 
         // ── 调用 LLM ──
         let mut assistant_text = String::new();
@@ -178,7 +181,7 @@ pub async fn run_agent_with_interrupt(
         on_event(AgentEvent::Thinking);
 
         let result = tokio::select! {
-            result = provider.chat_stream(&session.messages, &tool_defs, |ev| {
+            result = provider.chat_stream(&send_messages, &tool_defs, |ev| {
                 match ev {
                     StreamEvent::ThinkingDelta(t) => {
                         on_event(AgentEvent::ThinkingDelta(t));
@@ -211,15 +214,24 @@ pub async fn run_agent_with_interrupt(
             finish_reason = stream_finish;
         }
 
-        total_tokens_in += ct_in;
-        total_tokens_out += ct_out;
+        // Context-window meter must be tokens, never 字/letters.
+        let prompt_tokens =
+            crate::token_est::resolve_prompt_tokens(ct_in, &send_messages);
+        let completion_tokens = if ct_out > 0 {
+            ct_out
+        } else {
+            crate::token_est::estimate_text_tokens(&assistant_text)
+        };
+
+        total_tokens_in += prompt_tokens;
+        total_tokens_out += completion_tokens;
         step += 1;
         run_steps += 1;
 
         on_event(AgentEvent::TextDone {
             content: assistant_text.clone(),
-            tokens_in: ct_in,
-            tokens_out: ct_out,
+            tokens_in: prompt_tokens,
+            tokens_out: completion_tokens,
         });
 
         // ── 组装 assistant message ──
@@ -414,7 +426,7 @@ pub async fn run_agent_with_interrupt(
             }
         }
 
-        // ── 上下文剪枝 ──
+        // Hard prune only after many steps — soft-compress already caps send size.
         if step as usize >= prune_after {
             prune_messages(&mut session.messages, prune_keep);
         }
@@ -434,17 +446,6 @@ pub async fn run_agent_with_interrupt(
     }
     session_store.save(&session).await?;
     Ok(())
-}
-
-fn tool_descriptions_text(registry: &ToolRegistry) -> String {
-    let mut s = String::new();
-    for d in registry.definitions() {
-        s.push_str(&format!(
-            "- {}: {}\n",
-            d.function.name, d.function.description
-        ));
-    }
-    s
 }
 
 fn truncate_tool_output(mut output: String) -> String {
@@ -523,6 +524,64 @@ async fn load_or_create_session(
         model.to_string(),
         provider.to_string(),
     ))
+}
+
+/// Soft-trim old tool result bodies (OpenCode prune style).
+/// Keeps message roles/order intact; only shrinks stale tool payloads.
+fn soft_compress_old_tool_results(
+    messages: &mut [Message],
+    keep_recent: usize,
+    head_chars: usize,
+    tail_chars: usize,
+) {
+    let tool_indices: Vec<usize> = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| m.role == "tool")
+        .map(|(i, _)| i)
+        .collect();
+    if tool_indices.len() <= keep_recent {
+        return;
+    }
+    let compress_until = tool_indices.len() - keep_recent;
+    let min_soft = head_chars.saturating_add(tail_chars).saturating_add(80);
+    for &idx in &tool_indices[..compress_until] {
+        let Some(content) = messages[idx].content.as_mut() else {
+            continue;
+        };
+        if content.starts_with("[tool output soft-trimmed")
+            || content.starts_with("[Old tool result")
+        {
+            continue;
+        }
+        if content.len() <= min_soft {
+            continue;
+        }
+        let original_len = content.len();
+        let head_end = {
+            let mut end = head_chars.min(content.len());
+            while end > 0 && !content.is_char_boundary(end) {
+                end -= 1;
+            }
+            end
+        };
+        let tail_start = {
+            let mut start = content.len().saturating_sub(tail_chars);
+            while start < content.len() && !content.is_char_boundary(start) {
+                start += 1;
+            }
+            start
+        };
+        if head_end >= tail_start {
+            *content = format!("[tool output soft-trimmed, {original_len} chars]");
+            continue;
+        }
+        let head = &content[..head_end];
+        let tail = &content[tail_start..];
+        *content = format!(
+            "{head}\n…\n[tool output soft-trimmed, {original_len} chars]\n…\n{tail}"
+        );
+    }
 }
 
 /// 剪枝: 保留 system + first_user + 最近 N 个 assistant 消息(及它们的 tool 回复)
@@ -619,6 +678,45 @@ fn looks_like_final_summary(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn soft_compress_keeps_recent_tools_full() {
+        let big = "x".repeat(2_000);
+        let mut messages = vec![
+            Message {
+                role: "system".into(),
+                content: Some("s".into()),
+                tool_calls: None,
+                tool_call_id: None,
+            },
+            Message {
+                role: "tool".into(),
+                content: Some(big.clone()),
+                tool_calls: None,
+                tool_call_id: Some("1".into()),
+            },
+            Message {
+                role: "tool".into(),
+                content: Some(big.clone()),
+                tool_calls: None,
+                tool_call_id: Some("2".into()),
+            },
+            Message {
+                role: "tool".into(),
+                content: Some(big.clone()),
+                tool_calls: None,
+                tool_call_id: Some("3".into()),
+            },
+        ];
+        soft_compress_old_tool_results(&mut messages, 2, 100, 50);
+        assert!(messages[1]
+            .content
+            .as_deref()
+            .unwrap_or("")
+            .contains("soft-trimmed"));
+        assert_eq!(messages[2].content.as_deref(), Some(big.as_str()));
+        assert_eq!(messages[3].content.as_deref(), Some(big.as_str()));
+    }
 
     #[test]
     fn truncates_unicode_tool_output_at_valid_boundary() {

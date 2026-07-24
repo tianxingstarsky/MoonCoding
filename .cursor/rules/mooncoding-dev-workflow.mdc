@@ -33,6 +33,17 @@ alwaysApply: true
 - vibe 锁定修改：展示**区块锁定行范围**（`locked lines A-B` / `lines.start-end`）。
 - 工具结果对「读/改」类默认应让人看见，而不是只留一行摘要。
 
+## 板端部署（每次新版本必做）
+
+改完可运行的产品代码（`vibe-ui` / `vibe-agent` / 板端脚本等）后，**必须**交叉编译并推到 Luckfox 板验证，不要只停在本机构建：
+
+1. `scripts/lyra-cross-build.sh`（WSL）→ `build-board/`
+2. 部署：`scripts/lyra-adb-deploy.ps1`，或至少 push `mooncoding` + `libvibe_agent.so`（优先 `rust-target/.../libvibe_agent.so`）+ `vibe`
+3. ADB：`E:\下载\adb_fastboot\adb.exe`（详见 `.cursor/skills/lyra-adb/SKILL.md`）
+4. 重启板端进程并确认 `pidof mooncoding` 存活后再宣称完成
+
+用户默认期望：**新版本 = 已上板可测**。
+
 ## 编码底线（与 AGENTS.md 一致）
 
 - 协议安全 > 便利（rev、purpose、字节一致）。

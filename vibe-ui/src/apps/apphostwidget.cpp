@@ -4,6 +4,7 @@
 #include "opencode_antialias.h"
 
 #include <QAbstractAnimation>
+#include <QApplication>
 #include <QEasingCurve>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -114,7 +115,11 @@ AppHostWidget::AppHostWidget(QWidget *parent)
     m_logDrawer->setMaximumBlockCount(2000);
     m_logDrawer->setMinimumHeight(0);
     m_logDrawer->setMaximumHeight(0);
-    m_logDrawer->setFont(opencode::monospaceFont(12));
+    const int monoPx = qBound(9, QApplication::font().pixelSize() > 0
+                                    ? QApplication::font().pixelSize()
+                                    : 12,
+                                50);
+    m_logDrawer->setFont(opencode::monospaceFont(qMax(9, monoPx - 1)));
     m_logDrawer->hide();
 
     m_logAnimation->setDuration(160);

@@ -99,6 +99,9 @@ QVariant TreeModel::data(const QModelIndex &modelIndex, int role) const
         details << tr("修订 %1").arg(node.value(QStringLiteral("revision")).toInteger());
         return details.join(QStringLiteral("\n\n"));
     }
+    if (role == Qt::ForegroundRole && modelIndex.column() == StatusColumn) {
+        return statusColor(status);
+    }
     if (role != Qt::DisplayRole) {
         return {};
     }

@@ -40,7 +40,9 @@ for pat in \
   libQt6Qml.so* \
   libQt6Quick.so* \
   libnss3.so* libnssutil3.so* libsmime3.so* libssl3.so* libnspr4.so* \
-  libplc4.so* libplds4.so*
+  libplc4.so* libplds4.so* \
+  libsoftokn3.so* libfreebl3.so* libfreeblpriv3.so* libnssckbi.so* libnssdbm3.so* \
+  libsqlite3.so*
 do
   for base in "${TARGET}/usr/lib" "${SYS}/usr/lib"; do
     for f in ${base}/${pat}; do

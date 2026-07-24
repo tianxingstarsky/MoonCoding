@@ -11,8 +11,8 @@ temperature = 0.1
 
 [agent]
 max_steps = 200
-prune_after = 12
-prune_keep = 6
+prune_after = 48
+prune_keep = 12
 
 # For local ollama:
 # [provider]

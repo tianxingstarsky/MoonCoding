@@ -81,6 +81,27 @@ protected:
         return QWebEnginePage::acceptNavigationRequest(url, type, isMainFrame);
     }
 
+    void javaScriptConsoleMessage(JavaScriptConsoleMessageLevel level,
+                                  const QString &message,
+                                  int lineNumber,
+                                  const QString &sourceID) override
+    {
+        Q_UNUSED(level);
+        Q_UNUSED(lineNumber);
+        Q_UNUSED(sourceID);
+        // Reliable IME signaling: custom-scheme <a>/iframe often blocked by site CSP.
+        if (m_host && message.startsWith(QLatin1String("MOONCODING_IME:"))) {
+            const QString action = message.mid(QStringLiteral("MOONCODING_IME:").size());
+            if (action == QLatin1String("show")) {
+                m_host->notifyWebEditableFocus(true);
+            } else if (action == QLatin1String("hide")) {
+                m_host->notifyWebEditableFocus(false);
+            }
+            return;
+        }
+        QWebEnginePage::javaScriptConsoleMessage(level, message, lineNumber, sourceID);
+    }
+
 private:
     AppsWidget *m_host = nullptr;
 };
@@ -145,6 +166,7 @@ void AppsWidget::setWorkspace(const QString &workspace)
     // Project switch: destroy backend immediately so the port is freed.
     stopBackend();
     m_workspace = workspace;
+    m_loadedWorkspace.clear();
     m_backendPort = workspace.isEmpty() ? 0 : portForWorkspaceKey(normalizeWorkspaceKey(workspace));
     refresh();
 }
@@ -156,6 +178,11 @@ QString AppsWidget::previewModeLabel() const
 #else
     return tr("简化预览");
 #endif
+}
+
+QWidget *AppsWidget::previewWebView() const
+{
+    return m_webView;
 }
 
 void AppsWidget::buildUi()
@@ -212,6 +239,7 @@ void AppsWidget::buildUi()
     connect(m_webView, &QWebEngineView::loadFinished, this, [this](bool ok) {
         if (ok) {
             injectApiBase();
+            ensureImeBridge();
         }
     });
 #else
@@ -248,13 +276,21 @@ void AppsWidget::buildUi()
 
 void AppsWidget::refresh()
 {
-    loadIndexHtml();
+    // Light file-list refresh is fine; do not reload the web page if it already
+    // shows this workspace (switching Chat→Apps was forcing a full setHtml).
     populateFileList();
+    if (!m_workspace.isEmpty()
+        && m_loadedWorkspace == normalizeWorkspaceKey(m_workspace)) {
+        showPreviewPane();
+        return;
+    }
+    loadIndexHtml();
     showPreviewPane();
 }
 
 void AppsWidget::reloadPreview()
 {
+    m_loadedWorkspace.clear();
     loadIndexHtml();
     showPreviewPane();
 }
@@ -476,6 +512,173 @@ void AppsWidget::injectApiBase()
 #endif
 }
 
+void AppsWidget::ensureImeBridge()
+{
+#ifdef HAS_QT_WEBENGINE
+    if (!m_webView || !m_webView->page()) {
+        return;
+    }
+    // Board browser apps load sites (m.bilibili.com) in a same-origin proxy <iframe>.
+    // Focus does not bubble across frames; runJavaScript hits the main frame only.
+    // Attach to every same-origin document and resolve deepest activeElement on insert.
+    const QString source = QStringLiteral(
+        "(function(){"
+        "if(window.__mooncodingImeBridgeV3)return;"
+        "window.__mooncodingImeBridgeV3=true;"
+        "window.__mooncodingImeTarget=null;"
+        "function isEditable(el){"
+        "if(!el||el.nodeType!==1)return false;"
+        "if(el.disabled)return false;"
+        "var tag=(el.tagName||'').toLowerCase();"
+        "if(tag==='textarea')return true;"
+        "if(tag==='input'){"
+        "var t=(el.type||'text').toLowerCase();"
+        "if(['button','checkbox','radio','file','submit','reset','image','hidden',"
+        "'range','color'].indexOf(t)>=0)return false;"
+        "return true;"
+        "}"
+        "if(el.isContentEditable)return true;"
+        "var ce=(el.getAttribute&&el.getAttribute('contenteditable'))||'';"
+        "if(ce&&ce.toLowerCase()!=='false')return true;"
+        "var role=((el.getAttribute&&el.getAttribute('role'))||'').toLowerCase();"
+        "if(role==='textbox'||role==='searchbox'||role==='combobox')return true;"
+        "if(el.getAttribute&&el.getAttribute('inputmode'))return true;"
+        "return false;"
+        "}"
+        "function findEditable(start){"
+        "var el=start;"
+        "for(var i=0;el&&i<8;i++){"
+        "if(isEditable(el))return el;"
+        "el=el.parentElement||(el.getRootNode&&el.getRootNode().host)||null;"
+        "}"
+        "return null;"
+        "}"
+        "function editableFromEvent(e){"
+        "if(e&&e.composedPath){"
+        "var path=e.composedPath();"
+        "for(var i=0;i<path.length;i++){"
+        "if(isEditable(path[i]))return path[i];"
+        "}"
+        "}"
+        "return findEditable(e&&e.target);"
+        "}"
+        "function deepestActive(doc){"
+        "try{"
+        "var el=doc.activeElement;"
+        "if(!el)return null;"
+        "var tag=(el.tagName||'').toUpperCase();"
+        "if(tag==='IFRAME'||tag==='FRAME'){"
+        "try{"
+        "if(el.contentDocument){"
+        "var inner=deepestActive(el.contentDocument);"
+        "if(inner)return inner;"
+        "}"
+        "}catch(err){}"
+        "return el;"
+        "}"
+        "return el;"
+        "}catch(err){return null;}"
+        "}"
+        "function isEditingNow(){"
+        "var el=deepestActive(document);"
+        "if(isEditable(el))return true;"
+        "var tag=el&&(el.tagName||'').toUpperCase();"
+        "return tag==='IFRAME'||tag==='FRAME';"
+        "}"
+        "function notify(action){"
+        "try{console.log('MOONCODING_IME:'+action);}catch(err){}"
+        "try{"
+        "var iframe=document.createElement('iframe');"
+        "iframe.setAttribute('src','mooncoding://ime/'+action);"
+        "iframe.style.cssText='display:none;width:0;height:0;border:0;position:fixed';"
+        "document.documentElement.appendChild(iframe);"
+        "setTimeout(function(){try{iframe.remove();}catch(e){}},0);"
+        "}catch(err){}"
+        "}"
+        "function showFor(el){"
+        "if(!el)return;"
+        "try{window.__mooncodingImeTarget=el;}catch(err){}"
+        "notify('show');"
+        "}"
+        "function onPointer(e){"
+        "var t=e&&e.target;"
+        "var tag=t&&(t.tagName||'').toUpperCase();"
+        "if(tag==='IFRAME'||tag==='FRAME'){notify('show');}"
+        "var el=editableFromEvent(e);"
+        "if(el)showFor(el);"
+        "}"
+        "function attachToDocument(doc){"
+        "if(!doc||doc.__mooncodingImeDocV3)return;"
+        "doc.__mooncodingImeDocV3=true;"
+        "doc.addEventListener('focusin',function(e){"
+        "var el=editableFromEvent(e);"
+        "if(el)showFor(el);"
+        "},true);"
+        "doc.addEventListener('focusout',function(){"
+        "setTimeout(function(){"
+        "if(isEditingNow())return;"
+        "notify('hide');"
+        "},220);"
+        "},true);"
+        "doc.addEventListener('pointerdown',onPointer,true);"
+        "doc.addEventListener('touchstart',onPointer,{capture:true,passive:true});"
+        "doc.addEventListener('mousedown',onPointer,true);"
+        "doc.addEventListener('click',onPointer,true);"
+        "}"
+        "function scanFrames(){"
+        "attachToDocument(document);"
+        "var list=document.querySelectorAll('iframe,frame');"
+        "for(var i=0;i<list.length;i++){"
+        "(function(frame){"
+        "try{"
+        "if(frame.contentDocument)attachToDocument(frame.contentDocument);"
+        "}catch(err){}"
+        "if(!frame.__mooncodingImeLoadHook){"
+        "frame.__mooncodingImeLoadHook=true;"
+        "frame.addEventListener('load',function(){"
+        "try{if(frame.contentDocument)attachToDocument(frame.contentDocument);}catch(err){}"
+        "});"
+        "}"
+        "})(list[i]);"
+        "}"
+        "}"
+        "attachToDocument(document);"
+        "scanFrames();"
+        "try{"
+        "new MutationObserver(function(){scanFrames();})"
+        ".observe(document.documentElement,{childList:true,subtree:true});"
+        "}catch(err){}"
+        "setInterval(scanFrames,1200);"
+        "})();");
+
+    QWebEngineScriptCollection &scripts = m_webView->page()->scripts();
+    const QStringList imeNames{QStringLiteral("mooncoding-ime-bridge"),
+                               QStringLiteral("mooncoding-ime-bridge-app"),
+                               QStringLiteral("mooncoding-ime-bridge-main")};
+    for (const QString &name : imeNames) {
+        const QList<QWebEngineScript> old = scripts.find(name);
+        for (const QWebEngineScript &s : old) {
+            scripts.remove(s);
+        }
+    }
+    auto insertWorld = [&](const QString &name, QWebEngineScript::ScriptWorldId world) {
+        QWebEngineScript boot;
+        boot.setName(name);
+        boot.setSourceCode(source);
+        boot.setInjectionPoint(QWebEngineScript::DocumentCreation);
+        boot.setWorldId(world);
+        boot.setRunsOnSubFrames(true);
+        scripts.insert(boot);
+    };
+    insertWorld(QStringLiteral("mooncoding-ime-bridge-app"), QWebEngineScript::ApplicationWorld);
+    insertWorld(QStringLiteral("mooncoding-ime-bridge-main"), QWebEngineScript::MainWorld);
+    m_webView->page()->runJavaScript(source);
+    m_webView->page()->runJavaScript(source, QWebEngineScript::ApplicationWorld);
+#else
+    // Simplified QTextBrowser preview has no interactive HTML form IME bridge.
+#endif
+}
+
 void AppsWidget::ensureBackendRunning()
 {
     updateBackendButton();
@@ -504,6 +707,7 @@ void AppsWidget::ensureBackendRunning()
 void AppsWidget::loadIndexHtml()
 {
     if (m_workspace.isEmpty()) {
+        m_loadedWorkspace.clear();
         m_status->setText(tr("无项目 · %1").arg(previewModeLabel()));
         updateBackendButton();
         m_webView->setHtml(tr("<p>请先创建或打开项目</p>"));
@@ -515,6 +719,7 @@ void AppsWidget::loadIndexHtml()
 
     const QString indexPath = QDir(m_workspace).absoluteFilePath(QStringLiteral("index.html"));
     if (!QFileInfo::exists(indexPath)) {
+        m_loadedWorkspace.clear();
         m_status->setText(tr("缺少 index.html — 让 AI 在本工作区创建入口 · %1")
                               .arg(previewModeLabel()));
         const QString missing = tr(
@@ -531,9 +736,11 @@ void AppsWidget::loadIndexHtml()
     // Auto-start before loading so the page can fetch immediately.
     ensureBackendRunning();
     injectApiBase();
+    ensureImeBridge();
 
     QFile f(indexPath);
     if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        m_loadedWorkspace.clear();
         m_status->setText(tr("无法读取 index.html · %1").arg(previewModeLabel()));
         return;
     }
@@ -555,6 +762,7 @@ void AppsWidget::loadIndexHtml()
     m_webView->document()->setBaseUrl(base);
     m_webView->setHtml(QString::fromUtf8(html));
 #endif
+    m_loadedWorkspace = normalizeWorkspaceKey(m_workspace);
     if (hasBackendScript()
         && ((m_backend && m_backend->state() == QProcess::Running) || adoptRunningLease())) {
         m_status->setText(tr("预览 · %1 · %2 · 后端 :%3")
@@ -637,6 +845,11 @@ void AppsWidget::onAnchorClicked(const QUrl &url)
     handleMooncodingUrl(url);
 }
 
+void AppsWidget::notifyWebEditableFocus(bool focused)
+{
+    emit webEditableFocusChanged(focused);
+}
+
 void AppsWidget::handleMooncodingUrl(const QUrl &url)
 {
     if (url.scheme() != QLatin1String("mooncoding")) {
@@ -645,6 +858,17 @@ void AppsWidget::handleMooncodingUrl(const QUrl &url)
     const QString path = url.path();
     const QString host = url.host();
     const QString combined = host + path;
+    if (host == QLatin1String("ime")
+        || combined.startsWith(QLatin1String("ime/"))) {
+        const QString action = path.startsWith(QLatin1Char('/')) ? path.mid(1) : path;
+        if (action == QLatin1String("show") || combined.contains(QLatin1String("ime/show"))) {
+            notifyWebEditableFocus(true);
+        } else if (action == QLatin1String("hide")
+                   || combined.contains(QLatin1String("ime/hide"))) {
+            notifyWebEditableFocus(false);
+        }
+        return;
+    }
     if (combined.contains(QLatin1String("backend/start"))
         || path.endsWith(QLatin1String("start"))) {
         startBackend();

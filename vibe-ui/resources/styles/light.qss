@@ -151,7 +151,7 @@ QTreeView {
     background: #ffffff; alternate-background-color: #f9f9fb;
     border: none; outline: none; show-decoration-selected: 1; color: #1d1d1f;
 }
-QTreeView::item { min-height: 46px; border-bottom: 1px solid #e5e5ea; padding: 4px 8px; }
+QTreeView::item { min-height: 46px; border-bottom: 1px solid #e5e5ea; padding: 4px 8px; color: #1d1d1f; }
 QTreeView::item:focus { outline: 2px solid #007aff; outline-offset: -2px; }
 QTreeView::item:selected { background: #007aff; color: #ffffff; }
 QHeaderView::section {
@@ -232,6 +232,10 @@ QDialog QLabel { background: transparent; }
 #wifiNetworkList { background: #ffffff; border: 1px solid #d1d1d6; color: #1d1d1f; }
 #wifiNetworkList::item { min-height: 40px; padding: 6px 8px; }
 #wifiNetworkList::item:selected { background: #007aff; color: #ffffff; }
+#wifiConnectProgress {
+    border: 1px solid #d1d1d6; border-radius: 6px; background: #f2f2f7; min-height: 16px;
+}
+#wifiConnectProgress::chunk { background: #007aff; border-radius: 5px; }
 
 QPushButton { min-height: 40px; }
 #sendButton { min-height: 40px; min-width: 64px; max-width: 80px; padding: 6px 8px; }

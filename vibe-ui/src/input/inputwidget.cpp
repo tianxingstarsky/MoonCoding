@@ -24,7 +24,13 @@
 
 #include <QToolButton>
 
+#include <QTimer>
+
 #include <QVBoxLayout>
+
+#include <QtGlobal>
+
+#include <cmath>
 
 
 
@@ -222,21 +228,32 @@ bool InputWidget::eventFilter(QObject *watched, QEvent *event)
 
 {
 
-    if (watched == m_editor && event->type() == QEvent::KeyPress) {
+    if (watched == m_editor) {
 
-        auto *keyEvent = static_cast<QKeyEvent *>(event);
+        if (event->type() == QEvent::KeyPress) {
 
-        if ((keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter)
+            auto *keyEvent = static_cast<QKeyEvent *>(event);
 
-            && keyEvent->modifiers().testFlag(Qt::ControlModifier)) {
+            if ((keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter)
 
-            if (!m_busy) {
+                && keyEvent->modifiers().testFlag(Qt::ControlModifier)) {
 
-                submit();
+                if (!m_busy) {
+
+                    submit();
+
+                }
+
+                return true;
 
             }
 
-            return true;
+        } else if (event->type() == QEvent::FontChange
+
+                   || event->type() == QEvent::Resize) {
+
+            // Defer: Resize/FontChange during style polish must not re-enter layout.
+            QTimer::singleShot(0, this, &InputWidget::adjustEditorHeight);
 
         }
 
@@ -248,25 +265,77 @@ bool InputWidget::eventFilter(QObject *watched, QEvent *event)
 
 
 
+void InputWidget::refreshLayout()
+
+{
+
+    adjustEditorHeight();
+
+}
+
+
+
 void InputWidget::adjustEditorHeight()
 
 {
 
+    if (!m_editor || m_adjustingHeight) {
+
+        return;
+
+    }
+
+    m_adjustingHeight = true;
+
+
+
+    // Keep document metrics in sync with the painted (QSS) font.
+
+    m_editor->document()->setDefaultFont(m_editor->font());
+
+
+
     const QFontMetrics fm(m_editor->font());
 
-    const int lineH = qMax(18, fm.lineSpacing());
+    const int lineH = qMax(20, fm.lineSpacing());
 
-    const int pad = 16;
 
-    const int minH = lineH * kMinEditorLines + pad;
 
-    const int maxH = lineH * kMaxEditorLines + pad;
+    // Outer fixed height must cover one full line of text + QSS padding/border.
 
-    m_editor->document()->setTextWidth(m_editor->viewport()->width());
+    int chrome = m_editor->height() - m_editor->viewport()->height();
 
-    const int docH = int(m_editor->document()->size().height()) + pad;
+    if (chrome < 8) {
+
+        const QMargins cm = m_editor->contentsMargins();
+
+        chrome = cm.top() + cm.bottom() + 2 * m_editor->frameWidth();
+
+    }
+
+    if (chrome < 8) {
+
+        chrome = 24; // padding 10+10 + board border 2+2
+
+    }
+
+
+
+    const int minH = lineH * kMinEditorLines + chrome;
+
+    const int maxH = lineH * kMaxEditorLines + chrome;
+
+
+
+    const int viewW = qMax(1, m_editor->viewport()->width());
+
+    m_editor->document()->setTextWidth(viewW);
+
+    const int docH = int(std::ceil(m_editor->document()->size().height())) + chrome;
 
     const int h = qBound(minH, docH, maxH);
+
+
 
     if (m_editor->height() != h) {
 
@@ -274,7 +343,9 @@ void InputWidget::adjustEditorHeight()
 
     }
 
-    m_sendButton->setFixedHeight(qMax(40, qMin(h, 52)));
+    m_sendButton->setFixedHeight(qMax(40, h));
+
+    m_adjustingHeight = false;
 
 }
 
@@ -450,6 +521,30 @@ void InputWidget::setContextSteps(quint64 steps)
 
 
 
+void InputWidget::setContextWindowK(int windowK)
+
+{
+
+    m_contextWindowK = qBound(8, windowK, 2000);
+
+    refreshContextInfo();
+
+}
+
+
+
+void InputWidget::setContextPromptTokens(quint64 promptTokens)
+
+{
+
+    m_contextPromptTokens = promptTokens;
+
+    refreshContextInfo();
+
+}
+
+
+
 void InputWidget::refreshContextInfo()
 
 {
@@ -460,9 +555,29 @@ void InputWidget::refreshContextInfo()
 
         parts.append(tr("%1 步").arg(m_contextSteps));
 
+
+
+    // Window fill = last-turn prompt tokens only (never cumulative 入, never 字).
+
+    if (m_contextPromptTokens > 0) {
+
+        const double usedK = double(m_contextPromptTokens) / 1000.0;
+
+        parts.append(tr("上下文 %1k / %2k")
+
+                         .arg(usedK, 0, 'f', usedK >= 100.0 ? 0 : 1)
+
+                         .arg(m_contextWindowK));
+
+    } else {
+
+        parts.append(tr("上下文 — / %1k").arg(m_contextWindowK));
+
+    }
+
     if (m_contextTokensIn + m_contextTokensOut > 0) {
 
-        parts.append(tr("入 %1 · 出 %2").arg(m_contextTokensIn).arg(m_contextTokensOut));
+        parts.append(tr("累计 入 %1 · 出 %2").arg(m_contextTokensIn).arg(m_contextTokensOut));
 
     }
 

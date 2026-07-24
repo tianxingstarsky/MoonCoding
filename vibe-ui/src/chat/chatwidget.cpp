@@ -1,4 +1,5 @@
 #include "chatwidget.h"
+#include "input/touchscroll.h"
 #include "opencode_antialias.h"
 
 #include <QApplication>
@@ -134,7 +135,11 @@ void applyMessageBodyStyle(QTextBrowser *body)
     f.setStyleStrategy(QFont::PreferAntialias);
     f.setFamilies(opencode::uiFontFamilies());
     body->setFont(f);
-    const int sz = qBound(9, f.pointSize() > 0 ? f.pointSize() : 13, 28);
+    int raw = f.pixelSize();
+    if (raw <= 0) {
+        raw = f.pointSize() > 0 ? f.pointSize() : 13;
+    }
+    const int sz = qBound(9, raw, 50);
     const QString families = cssFontStack(opencode::uiFontFamilies());
     const QString mono = cssFontStack(opencode::monoFontFamilies());
     // pre-wrap + break-word: long paths/tokens stay inside the chat column.
@@ -460,7 +465,17 @@ void ChatWidget::reflowMessageBodies()
 
 void ChatWidget::refreshFonts()
 {
-    // Labels pick up application font via stylesheets; nothing heavy to refresh.
+    // Force chat labels (messageBody / answerBody / tools) to re-polish after QSS swap.
+    const auto labels = findChildren<QLabel *>();
+    for (QLabel *label : labels) {
+        if (!label) {
+            continue;
+        }
+        label->setFont(QApplication::font());
+        label->style()->unpolish(label);
+        label->style()->polish(label);
+        label->update();
+    }
     constrainChatColumn();
 }
 
@@ -540,6 +555,7 @@ void ChatWidget::openThinkingSegment()
     body->setObjectName(QStringLiteral("thinkingBody"));
     body->setWordWrap(true);
     body->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    touchscroll::makeScrollFriendlySelectable(body);
     body->setAlignment(Qt::AlignTop | Qt::AlignLeft);
     body->setMinimumWidth(0);
     body->setMaximumHeight(160);
@@ -615,6 +631,7 @@ void ChatWidget::openAnswerSegment()
     body->setObjectName(QStringLiteral("answerBody"));
     body->setWordWrap(true);
     body->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    touchscroll::makeScrollFriendlySelectable(body);
     body->setAlignment(Qt::AlignTop | Qt::AlignLeft);
     body->setMinimumWidth(0);
     body->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
@@ -700,6 +717,7 @@ ChatWidget::MessageWidgets ChatWidget::createMessage(const QString &role, bool u
     body->setObjectName(QStringLiteral("messageBody"));
     body->setWordWrap(true);
     body->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    touchscroll::makeScrollFriendlySelectable(body);
     body->setAlignment(Qt::AlignTop | Qt::AlignLeft);
     body->setMinimumWidth(0);
     body->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
@@ -766,6 +784,7 @@ ChatWidget::ToolBlock ChatWidget::createToolBlock(
     outputWidget->setObjectName(QStringLiteral("toolOutput"));
     outputWidget->setWordWrap(true);
     outputWidget->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    touchscroll::makeScrollFriendlySelectable(outputWidget);
     outputWidget->setTextFormat(Qt::PlainText);
     outputWidget->setAlignment(Qt::AlignTop | Qt::AlignLeft);
     outputWidget->setMinimumWidth(0);
@@ -1092,20 +1111,72 @@ void ChatWidget::finalizeCard()
 void ChatWidget::setMessages(const QJsonArray &messages)
 {
     clear();
+    auto ensureHistoryAssistant = [this]() {
+        if (m_streamingMessage.row) {
+            return;
+        }
+        m_streamingText.clear();
+        m_pendingToolNames.clear();
+        m_pendingToolInputs.clear();
+        m_pendingToolBlocks.clear();
+        m_toolStep = 0;
+        m_thinkingCount = 0;
+        m_answerCount = 0;
+        m_activeThinking = {};
+        m_activeAnswer = {};
+        // Do not open a thinking segment for history restore.
+        m_streamingMessage = createMessage(tr("MoonCoding"), false);
+        m_streamingMessage.meta->setText(tr("历史"));
+        setStreamingAccent(false);
+    };
+
     for (const QJsonValue &value : messages) {
         const QJsonObject msg = value.toObject();
         const QString role = msg.value(QStringLiteral("role")).toString();
         const QString content = msg.value(QStringLiteral("content")).toString();
         if (role == QStringLiteral("user")) {
+            if (m_streamingMessage.row) {
+                m_streamingMessage.meta->setText(tr("历史"));
+                finalizeCard();
+            }
             appendUserMessage(content);
         } else if (role == QStringLiteral("assistant")) {
-            MessageWidgets restored = createMessage(tr("MoonCoding"), false);
-            if (restored.body) {
-                restored.body->show();
-                restored.body->setText(content);
+            ensureHistoryAssistant();
+            const QJsonArray toolCalls = msg.value(QStringLiteral("tool_calls")).toArray();
+            for (const QJsonValue &tcVal : toolCalls) {
+                const QJsonObject tc = tcVal.toObject();
+                const QString id = tc.value(QStringLiteral("id")).toString();
+                const QJsonObject fn = tc.value(QStringLiteral("function")).toObject();
+                const QString name = fn.value(QStringLiteral("name")).toString();
+                const QString args = fn.value(QStringLiteral("arguments")).toString();
+                if (!id.isEmpty() && !name.isEmpty()) {
+                    showToolStart(id, name, args);
+                }
             }
-            restored.meta->setText(tr("历史"));
+            if (!content.trimmed().isEmpty()) {
+                sealActiveThinking();
+                if (!m_activeAnswer.widget || m_activeAnswer.sealed) {
+                    openAnswerSegment();
+                }
+                m_activeAnswer.text = content;
+                m_streamingText = content;
+                sealActiveAnswer();
+            }
+            m_streamingMessage.meta->setText(tr("历史"));
+        } else if (role == QStringLiteral("tool")) {
+            ensureHistoryAssistant();
+            const QString id = msg.value(QStringLiteral("tool_call_id")).toString();
+            QString name = msg.value(QStringLiteral("name")).toString();
+            if (name.isEmpty()) {
+                name = m_pendingToolNames.value(id, QStringLiteral("tool"));
+            }
+            showToolResult(id, name, content, 0, 0);
+            m_streamingMessage.meta->setText(tr("历史"));
         }
+    }
+    if (m_streamingMessage.row) {
+        m_streamingMessage.meta->setText(tr("历史"));
+        finalizeCard();
     }
     scrollToBottom();
 }

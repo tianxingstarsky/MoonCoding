@@ -515,14 +515,22 @@ impl TreeManager {
 
     pub fn prompt_summary(&self) -> String {
         if self.tree.nodes.is_empty() {
-            return "Project tree is empty. Create a basic project tree before multi-step implementation."
-                .to_string();
+            return format!(
+                "Tree version: {}. Project tree is empty. Before multi-step implementation, \
+                 create a basic tree with tree action=create_nodes, e.g. \
+                 {{\"action\":\"create_nodes\",\"expected_version\":{},\
+\"nodes\":[{{\"id\":\"root\",\"title\":\"Project\",\"kind\":\"project\",\"status\":\"pending\"}},\
+{{\"id\":\"ui\",\"parent_id\":\"root\",\"title\":\"Build index.html\",\"kind\":\"task\",\
+\"status\":\"pending\",\"target_files\":[\"index.html\"]}}]}}.",
+                self.tree.version, self.tree.version
+            );
         }
         if self.tree.nodes.len() > 80 {
             return self.compact_prompt_summary();
         }
         let mut output = format!(
-            "Tree version: {}. Human-owned fields are authoritative and must not be overwritten.\n",
+            "Tree version: {}. Prefer preserving recent human notes when still relevant. \
+             You may create additional nodes with create_nodes when the task needs new structure.\n",
             self.tree.version
         );
         for root in self
